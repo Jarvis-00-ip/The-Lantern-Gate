@@ -23,6 +23,17 @@
             <div id="yard-container">
                 <!-- The Grid will be rendered here by renderer.js -->
                 <div id="yard-view" class="yard-grid"></div>
+
+                <!-- Map Controls Overlay -->
+                <div class="map-controls">
+                    <div class="slider-container">
+                        <label for="zoom-slider" style="font-size: 0.8rem; color: var(--text-secondary);">Zoom</label>
+                        <input type="range" id="zoom-slider" min="0.2" max="3" step="0.1" value="1">
+                        <span id="zoom-val" style="font-size: 0.8rem; width: 40px; text-align: right;">100%</span>
+                    </div>
+                    <button id="btn-reset-view" class="btn btn-secondary"
+                        style="font-size: 0.75rem; padding: 4px;">Reset View</button>
+                </div>
             </div>
 
             <aside id="info-panel">
@@ -53,6 +64,23 @@
                     <div class="actions">
                         <button id="btn-add" class="btn btn-primary">Add</button>
                         <button id="btn-remove" class="btn btn-danger">Remove Top</button>
+                    </div>
+
+                    <div class="actions"
+                        style="margin-top: 1rem; border-top: 1px solid var(--border-color); padding-top: 1rem;">
+                        <button id="btn-move-mode" class="btn btn-secondary" style="width: 100%">Toggle Move
+                            Mode</button>
+                        <div id="move-status"
+                            style="font-size: 0.8rem; margin-top: 0.5rem; color: var(--text-muted); display: none;">
+                            Select Source...</div>
+                    </div>
+
+                    <div class="control-group" style="margin-top: 2rem;">
+                        <label>Find Container</label>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="text" id="inp-search" placeholder="Container ID">
+                            <button id="btn-search" class="btn btn-primary">Find</button>
+                        </div>
                     </div>
                 </div>
 

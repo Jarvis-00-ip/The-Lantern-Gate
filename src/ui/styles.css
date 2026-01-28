@@ -12,6 +12,10 @@
     --ground-slot: #21262d;
 }
 
+* {
+    box-sizing: border-box;
+}
+
 body {
     margin: 0;
     font-family: 'Inter', sans-serif;
@@ -20,7 +24,24 @@ body {
     display: flex;
     flex-direction: column;
     height: 100vh;
+    width: 100vw;
+    /* Strict width */
     overflow: hidden;
+}
+
+/* ... existing styles ... */
+
+#info-panel {
+    width: 300px;
+    flex-shrink: 0;
+    /* Prevent panel from being compressed */
+    background-color: var(--panel-bg);
+    border-left: 1px solid var(--border-color);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+    overflow-y: auto;
+    height: 100%;
 }
 
 header {
@@ -30,6 +51,8 @@ header {
     display: flex;
     justify-content: space-between;
     align-items: center;
+    flex-shrink: 0;
+    /* Prevent header from shrinking */
 }
 
 header h1 {
@@ -56,11 +79,16 @@ main {
 
 #yard-container {
     flex: 1;
-    padding: 2rem;
-    overflow: auto;
-    display: flex;
-    justify-content: center;
-    align-items: start;
+    overflow: hidden;
+    /* Hide scrollbars for map behavior */
+    position: relative;
+    background-color: #0d1117;
+    /* Ensure background matches */
+    cursor: grab;
+}
+
+#yard-container:active {
+    cursor: grabbing;
 }
 
 .yard-grid {
@@ -70,7 +98,43 @@ main {
     background-color: #1c2128;
     border: 1px solid var(--border-color);
     border-radius: 6px;
-    /* Grid columns will be set dynamically via JS */
+    /* Transformation for Pan/Zoom */
+    transform-origin: top left;
+    transition: transform 0.1s cubic-bezier(0.1, 0.7, 1.0, 0.1);
+    /* Smooth pan */
+    position: absolute;
+    /* Allow free movement */
+    top: 50%;
+    left: 50%;
+    transform: translate(-50%, -50%);
+    /* Centered by default */
+}
+
+/* Map Controls Overlay */
+.map-controls {
+    position: absolute;
+    bottom: 2rem;
+    left: 2rem;
+    background-color: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    padding: 10px;
+    border-radius: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+    z-index: 10;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+}
+
+.slider-container {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+}
+
+input[type=range] {
+    width: 120px;
+    accent-color: var(--accent-color);
 }
 
 /* A single stack (slot on the ground) */
@@ -151,6 +215,9 @@ main {
     padding: 1.5rem;
     display: flex;
     flex-direction: column;
+    overflow-y: auto;
+    height: 100%;
+    /* Force full height to trigger overflow */
 }
 
 #info-panel h2 {
@@ -245,4 +312,10 @@ select:focus {
     background-color: var(--container-imo);
     /* Red */
     color: white;
+}
+
+.btn-secondary {
+    background-color: var(--ground-slot);
+    color: var(--text-primary);
+    border: 1px solid var(--border-color);
 }

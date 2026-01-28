@@ -1,12 +1,16 @@
 import { Yard, Container, ContainerType } from '../core/yardManager.js';
 import { YardRenderer } from './renderer.js';
 import { ControlPanel } from './controlPanel.js';
+import { MapControls } from './mapControls.js';
 
 console.log("Initializing The Lantern Gate UI...");
 
 // Initialize System
 const yard = new Yard();
 const renderer = new YardRenderer(yard, 'yard-view');
+
+// Initialize Map Controls
+const mapControls = new MapControls('yard-container', 'yard-view');
 
 // Render Function
 const renderApp = () => {

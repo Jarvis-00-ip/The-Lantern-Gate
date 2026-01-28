@@ -106,7 +106,7 @@ export class YardRenderer {
             html += `
                 <div class="info-row" style="padding: 4px; background: #21262d; border-radius: 4px; margin-bottom: 4px;">
                     <div style="font-weight:bold; color: ${this._getColorForType(c.type)}">${c.id}</div>
-                    <div style="font-size: 0.8rem; color: #8b949e;">Type: ${c.type} | Tier: ${actualTier}</div>
+                    <div style="font-size: 0.8rem; color: #8b949e;">Type: ${c.type} | Tier: ${actualTier} | Digs: ${index}</div>
                 </div>
             `;
         });

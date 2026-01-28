@@ -20,6 +20,12 @@ export class ControlPanel {
         this.btnAdd = document.getElementById('btn-add');
         this.btnRemove = document.getElementById('btn-remove');
 
+        // Move & Search Elements
+        this.btnMoveMode = document.getElementById('btn-move-mode');
+        this.moveStatus = document.getElementById('move-status');
+        this.inpSearch = document.getElementById('inp-search');
+        this.btnSearch = document.getElementById('btn-search');
+
         // Listeners
         this.btnAdd.addEventListener('click', () => this.handleAdd());
         this.btnRemove.addEventListener('click', () => this.handleRemove());
@@ -27,6 +33,14 @@ export class ControlPanel {
         // Listen to manual input changes to update button states
         this.inpBay.addEventListener('change', () => this.checkStates());
         this.inpRow.addEventListener('change', () => this.checkStates());
+
+        // New Listeners
+        this.btnMoveMode.addEventListener('click', () => this.toggleMoveMode());
+        this.btnSearch.addEventListener('click', () => this.handleSearch());
+
+        // State
+        this.moveMode = false;
+        this.moveSource = null;
     }
 
     /**
@@ -34,9 +48,89 @@ export class ControlPanel {
      * Updates inputs and button states.
      */
     setTarget(bay, row) {
-        this.inpBay.value = bay;
-        this.inpRow.value = row;
-        this.checkStates();
+        if (this.moveMode) {
+            this.handleMoveSelection(bay, row);
+        } else {
+            this.inpBay.value = bay;
+            this.inpRow.value = row;
+            this.checkStates();
+        }
+    }
+
+    toggleMoveMode() {
+        this.moveMode = !this.moveMode;
+        this.moveSource = null; // Reset source on toggle
+
+        if (this.moveMode) {
+            this.btnMoveMode.textContent = "Cancel Move";
+            this.btnMoveMode.style.borderColor = "var(--accent-color)";
+            this.moveStatus.style.display = 'block';
+            this.moveStatus.textContent = "Select Source Stack...";
+        } else {
+            this.btnMoveMode.textContent = "Toggle Move Mode";
+            this.btnMoveMode.style.borderColor = "var(--border-color)";
+            this.moveStatus.style.display = 'none';
+        }
+    }
+
+    handleMoveSelection(bay, row) {
+        if (!this.moveSource) {
+            // Select Source
+            const stackHeight = this.yard.getStackHeight(bay, row);
+            if (stackHeight === 0) {
+                alert("Source stack is empty!");
+                return;
+            }
+            this.moveSource = { bay, row };
+            this.moveStatus.textContent = `Source: Bay ${bay}, Row ${row}. Select Destination...`;
+            // Visual feedback could be added here (e.g. highlight)
+            console.log("Move Source Selected:", this.moveSource);
+        } else {
+            // Select Destination and Execute
+            if (this.moveSource.bay === bay && this.moveSource.row === row) {
+                alert("Cannot move to the same stack!");
+                return;
+            }
+            this.executeMove(this.moveSource.bay, this.moveSource.row, bay, row);
+        }
+    }
+
+    executeMove(fromBay, fromRow, toBay, toRow) {
+        const success = this.yard.moveContainer(fromBay, fromRow, toBay, toRow);
+
+        if (success) {
+            console.log(`Moved container from ${fromBay}-${fromRow} to ${toBay}-${toRow}`);
+            this.refresh(fromBay, fromRow); // Refresh source
+            this.refresh(toBay, toRow);     // Refresh dest
+
+            // Exit move mode
+            this.toggleMoveMode();
+        } else {
+            alert("Move Failed. Check if destination is full.");
+            // Reset source to let user try again or cancel
+            this.moveSource = null;
+            this.moveStatus.textContent = "Move Failed. Select Source Again...";
+        }
+    }
+
+    handleSearch() {
+        const id = this.inpSearch.value.trim();
+        if (!id) return;
+
+        const result = this.yard.findContainer(id);
+        if (result) {
+            console.log("Found container:", result);
+            // Select the found stack
+            this.setTarget(result.bay, result.row);
+            // Force info panel update directly to show the specific stack if not in move mode
+            if (!this.moveMode && this.selectionInfoCallback) {
+                this.selectionInfoCallback(result.bay, result.row);
+            }
+            // Optional: Highlight logic could be pushed to renderer
+            alert(`Container ${result.container.id} found at Bay ${result.bay}, Row ${result.row}, Tier ${result.tier}`);
+        } else {
+            alert(`Container ${id} not found.`);
+        }
     }
 
     checkStates() {
