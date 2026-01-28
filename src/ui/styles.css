@@ -21,8 +21,8 @@ html,
 body {
     margin: 0;
     padding: 0;
-    width: 100%;
-    height: 100%;
+    width: 100vw;
+    height: 100vh;
     /* Critical for 100vh child elements */
     overflow: hidden;
     /* Prevent global scrollbars */
@@ -34,6 +34,13 @@ body {
 body {
     display: flex;
     flex-direction: column;
+}
+
+#app {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+    width: 100%;
 }
 
 /* ... existing styles ... */
@@ -88,6 +95,7 @@ main {
     display: flex;
     flex: 1;
     /* Take remaining space */
+    flex: 1;
     overflow: hidden;
     /* Contain children */
     min-height: 0;
@@ -201,6 +209,100 @@ input[type=range] {
     color: white;
     box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
     z-index: 2;
+}
+
+/* Splash Screen */
+.splash-screen {
+    position: fixed;
+    top: 0;
+    left: 0;
+    width: 100vw;
+    height: 100vh;
+    background-color: #ffffff;
+    /* White Theme */
+    z-index: 999999;
+    /* Max Z-Index */
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    transition: opacity 3s ease-out, visibility 3s;
+    /* 3s Fade */
+}
+
+.splash-screen.fade-out {
+    opacity: 0;
+    visibility: hidden;
+}
+
+.splash-content {
+    text-align: center;
+    color: #0d1117;
+    /* Dark Text */
+    font-family: 'Inter', sans-serif;
+}
+
+.splash-logo {
+    max-width: 300px;
+    margin-bottom: 20px;
+    border-radius: 8px;
+    box-shadow: 0 0 20px rgba(0, 0, 0, 0.2);
+}
+
+.loading-bar {
+    width: 200px;
+    height: 4px;
+    background: #e1e4e8;
+    margin: 0 auto 10px auto;
+    border-radius: 2px;
+    overflow: hidden;
+}
+
+.loading-progress {
+    width: 0%;
+    height: 100%;
+    background: #238636;
+    /* GitHub Green */
+    animation: loadProgress 2s ease-in-out forwards;
+}
+
+@keyframes loadProgress {
+    0% {
+        width: 0%;
+    }
+
+    100% {
+        width: 100%;
+    }
+}
+
+/* Responsiveness */
+
+/* Ultrawide 21:9 - Ensure full width */
+@media (min-width: 2000px) {
+    #yard-container {
+        max-width: 100% !important;
+        margin: 0 !important;
+        flex: 1 !important;
+    }
+
+    #info-panel {
+        /* Optional: Make panel slightly wider on huge screens */
+        width: 400px;
+    }
+}
+
+/* Small Screens */
+@media (max-width: 768px) {
+    .floating-menu {
+        width: 90% !important;
+        left: 5% !important;
+        top: 60px !important;
+    }
+
+    .vehicle-list {
+        max-height: 200px;
+        overflow-y: auto;
+    }
 }
 
 .type-Standard {

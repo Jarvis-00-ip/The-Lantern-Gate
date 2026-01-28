@@ -1,0 +1,44 @@
+# PROGETTO: THE LANTERN GATE - HANDOVER DOCUMENTATION
+# DATA: 29 Gennaio 2026
+# STATO: Funzionante / MVP Avanzato
+
+Ciao! Ecco il riassunto di tutto quello che abbiamo fatto oggi per permetterti di riprendere i lavori dal nuovo PC senza perdere il filo.
+
+## 1. MAPPING & PATHFINDING 🛣️
+- **Disegno Manuale**: Implementato strumento (icona matita) per disegnare strade direttamente sulla mappa.
+- **Grafo di Navigazione**: Il sistema converte automaticamente le linee disegnate in un grafo navigabile (`PathFinder.js`).
+- **Densificazione**: I segmenti stradali lunghi vengono spezzati ogni 15 metri. Questo migliora drasticamente lo "snapping" dei veicoli, che ora si collegano alla strada più vicina senza saltare chilometri.
+- **Export**: Aggiunto tasto "Export Roads" per salvare il network stradale in JSON (copia negli appunti).
+
+## 2. GESTIONE FLOTTA & VEICOLI 🚜
+- **Animazione**: I veicoli si muovono fluidamente lungo i percorsi stradali (linee ciano) invece che volare in linea retta.
+- **Deploy All**: Aggiunto pulsante nel pannello Depot per inviare tutti i mezzi alle destinazioni selezionate in massa.
+- **Ritardo Realistico**: I mezzi partono con un ritardo casuale tra 1 e 6 secondi per evitare l'effetto "robot sincronizzati".
+- **Re-Routing**: Se cambi destinazione mentre un mezzo è in viaggio, questo ricalcola il percorso dalla sua posizione attuale.
+
+## 3. DEBUG & VISUALIZZAZIONE 🐞
+- **Visual Modes**: Interruttore in alto a destra:
+  - **TEST MODE (ON)**: Colori accesi, bordi spessi, etichette zone visibili.
+  - **NORMAL MODE (OFF)**: Tema scuro professionale, niente etichette, colori sobri.
+- **Tracciati**:
+  - **Ciano**: Il percorso stradale calcolato.
+  - **Magenta (Tratteggiato)**: Le linee di "Snap" che mostrano la distanza tra il veicolo e la strada. Utile per capire se mancano strade.
+
+## 4. UI & UX 🎨
+- **Splash Screen**: Schermata di avvio bianca con logo "PSA SECH" e barra di caricamento. Dissolvenza cinematografica di 3 secondi.
+- **Layout Fullscreen**: Risolto problema bordi/cropping su schermi Ultrawide (21:9) e piccoli. Il sito ora occupa forzatamente il 100% di larghezza e altezza (`100vw/vh`).
+- **Responsività**: Pannelli laterali e menu si adattano meglio alle diverse risoluzioni.
+
+## 5. FILE CHIAVE MODIFICATI 📂
+- `src/core/PathFinder.js`: Logica densificazione e calcolo percorsi.
+- `src/ui/app.js`: Renderloop principale, gestione Visual Modes, animazione veicoli.
+- `src/ui/DepotUI.js`: Pannello controllo flotta, logica "Deploy All".
+- `src/ui/styles.css`: CSS per Splash Screen, Layout Fullscreen, Temi.
+- `index.html`: Struttura Splash Screen e contenitore App principale.
+
+## PROSSIMI PASSI SUGGERITI 🚀
+1. **Persistenza**: Salvare il grafo stradale su file/DB invece che ridisegnarlo o incollarlo ogni volta.
+2. **Logica Traffico**: Evitare che i veicoli si sovrappongano (collision avoidance semplice).
+3. **Integrazione Backend**: Collegare questi movimenti a dati reali o simulati dal server Python.
+
+Buon lavoro!

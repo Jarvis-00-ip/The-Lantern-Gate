@@ -1,8 +1,9 @@
 export class DepotUI {
-    constructor(containerId, fleetManager, geoManager) {
+    constructor(containerId, fleetManager, geoManager, onUpdate) {
         this.container = document.getElementById(containerId);
         this.fleet = fleetManager;
         this.geoManager = geoManager;
+        this.onUpdate = onUpdate; // Callback to trigger map re-render
         this.isVisible = false;
 
         this.init();
@@ -17,7 +18,10 @@ export class DepotUI {
         this.element.innerHTML = `
             <div class="floating-header" style="background: #2f363d;">
                 <span>🚜 Depot Management</span>
-                <button class="close-btn" id="depot-close">×</button>
+                <div style="display:flex; gap:5px; align-items:center;">
+                    <button id="btn-deploy-all" style="font-size:0.7rem; background:#238636; color:white; border:1px solid rgba(240,246,252,0.1); padding:2px 6px; border-radius:4px; cursor:pointer; margin-right:10px;">Deploy All</button>
+                    <button class="close-btn" id="depot-close">×</button>
+                </div>
             </div>
             <div class="floating-content" id="depot-body">
                 <!-- Vehicle List -->
@@ -28,6 +32,9 @@ export class DepotUI {
 
         // Close Handler
         this.element.querySelector('#depot-close').addEventListener('click', () => this.hide());
+
+        // Deploy All Handler
+        this.element.querySelector('#btn-deploy-all').addEventListener('click', () => this.handleDeployAll());
     }
 
     show() {
@@ -47,7 +54,13 @@ export class DepotUI {
     renderList() {
         const body = this.element.querySelector('#depot-body');
         const vehicles = this.fleet.getVehicles();
-        const zones = this.geoManager.getZones().filter(z => z.type !== 'DEPOT').map(z => z.id);
+
+        // Filter: Only allow deployment to Operational Zones
+        // types: LOADING, QUAY, GATE
+        const allowedTypes = ['LOADING', 'QUAY', 'GATE'];
+        const zones = this.geoManager.getZones()
+            .filter(z => allowedTypes.includes(z.type) && z.type !== 'DEPOT')
+            .map(z => z.id);
 
         let html = `
             <div style="margin-bottom:10px; font-size:0.85rem; color:#8b949e;">
@@ -77,17 +90,17 @@ export class DepotUI {
                         </span>
                     </div>
 
-                    <div style="display:grid; grid-template-columns: 1fr auto; gap:5px; align-items:center;">
-                        <select id="sel-zone-${v.id}" style="font-size:0.8rem; padding:4px;">
+                    <div style="display:grid; grid-template-columns: 1fr auto auto; gap:5px; align-items:center;">
+                        <select id="sel-zone-${v.id}" class="zone-selector" data-id="${v.id}" style="font-size:0.8rem; padding:4px;">
                             <option value="DEPOT_RALLE">Depot (Recall)</option>
                             ${zoneOptions}
                         </select>
+                         <span id="eta-${v.id}" style="font-size:0.75rem; color:#8b949e; min-width:50px; text-align:right;"></span>
                         <button class="btn-deploy" data-id="${v.id}" 
                             style="font-size:0.75rem; padding:4px 8px; cursor:pointer; background:var(--accent-color); color:white; border:none; border-radius:4px;">
                             ${v.status === 'Idle' ? 'Deploy' : 'Update'}
                         </button>
                     </div>
-                    ${v.assignedBlock ? `<div style="font-size:0.75rem; color:#e3b341; margin-top:4px;">Assigned: ${v.assignedBlock}</div>` : ''}
                 </div>
             `;
         });
@@ -104,15 +117,100 @@ export class DepotUI {
                 this.handleDeploy(id, sel.value);
             });
         });
+
+        // Bind Select Implementation for ETA
+        const selects = body.querySelectorAll('.zone-selector');
+        selects.forEach(sel => {
+            sel.addEventListener('change', (e) => {
+                const id = e.target.dataset.id;
+                const target = e.target.value;
+                this.updateETA(id, target);
+            });
+        });
+    }
+
+    updateETA(vehicleId, targetZone) {
+        const etaSpan = document.getElementById(`eta-${vehicleId}`);
+        if (!etaSpan) return;
+
+        if (targetZone === 'DEPOT_RALLE') {
+            etaSpan.textContent = '';
+            return;
+        }
+
+        const seconds = this.fleet.calculateTravelTime(vehicleId, targetZone, this.geoManager);
+        if (seconds > 0) {
+            etaSpan.textContent = `~${seconds}s`;
+            etaSpan.style.color = '#e3b341';
+        } else {
+            etaSpan.textContent = '';
+        }
     }
 
     handleDeploy(id, targetZone) {
         if (targetZone === 'DEPOT_RALLE') {
             this.fleet.recallVehicle(id);
         } else {
-            this.fleet.deployVehicle(id, targetZone);
+            // Updated to pass GeoManager
+            this.fleet.deployVehicle(id, targetZone, this.geoManager);
         }
         this.renderList(); // Refresh
         console.log(`Vehicle ${id} updated -> ${targetZone}`);
+
+        // Trigger external update (Map Render)
+        if (this.onUpdate) this.onUpdate();
+    }
+
+    handleDeployAll() {
+        console.log("Batch Deploy Initiated...");
+        const selects = this.element.querySelectorAll('.zone-selector');
+        let updateCount = 0;
+        let scheduledCount = 0;
+
+        selects.forEach(sel => {
+            const id = sel.dataset.id;
+            const targetZone = sel.value;
+            const vehicle = this.fleet.getVehicles().find(v => v.id === id);
+
+            let actionNeeded = false;
+            let isRecall = false;
+
+            if (targetZone === 'DEPOT_RALLE') {
+                if (vehicle.status !== 'Idle') {
+                    isRecall = true;
+                    actionNeeded = true;
+                }
+            } else {
+                if (vehicle.currentZone !== targetZone || vehicle.status === 'Idle') {
+                    actionNeeded = true;
+                }
+            }
+
+            if (actionNeeded) {
+                // Random Delay: 1s to 6s
+                const delayMs = Math.floor(Math.random() * 5000) + 1000;
+
+                console.log(`Scheduling ${id} in ${(delayMs / 1000).toFixed(1)}s`);
+
+                setTimeout(() => {
+                    if (isRecall) this.fleet.recallVehicle(id);
+                    else this.fleet.deployVehicle(id, targetZone, this.geoManager);
+
+                    // Trigger update after THIS specific move starts
+                    if (this.onUpdate) this.onUpdate();
+                }, delayMs);
+
+                scheduledCount++;
+            }
+        });
+
+        if (scheduledCount > 0) {
+            console.log(`Batch Deploy: Scheduled ${scheduledCount} vehicles with delays.`);
+            // Note: We don't renderList immediately because status hasn't changed yet.
+            // But we might want to give visual feedback?
+            // For now, let the timeout triggers handle the updates.
+        } else {
+            console.log("Batch Deploy: No changes detected.");
+        }
     }
 }

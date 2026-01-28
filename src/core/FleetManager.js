@@ -17,6 +17,7 @@ export class Vehicle {
         this.status = VehicleStatus.IDLE;
         this.currentZone = 'DEPOT_RALLE'; // Default location
         this.assignedBlock = null; // e.g., 'BLOCK_A'
+        this.position = { x: 0, y: 0, rotation: 0 };
     }
 }
 
@@ -44,11 +45,87 @@ export class FleetManager {
         return this.vehicles.find(v => v.id === id);
     }
 
-    deployVehicle(id, targetZone) {
+    /**
+     * Deploys a vehicle to a specific zone if allowed.
+     * @param {string} id - Vehicle ID
+     * @param {string} targetZoneId - Target Zone ID (e.g. "QUAY")
+     * @param {Object} geoManager - Instance of GeoManager
+     */
+    deployVehicle(id, targetZoneId, geoManager) {
+        const v = this.getVehicle(id);
+        if (!v) {
+            console.error(`Vehicle ${id} not found.`);
+            return false;
+        }
+
+        // 1. Find Zone by ID (geoManager.zones has objects with id and type)
+        const zoneObj = geoManager.getZones().find(z => z.id === targetZoneId);
+
+        if (!zoneObj) {
+            console.error(`Zone ${targetZoneId} not found.`);
+            return false;
+        }
+
+        // 2. Validate Vehicle Compatibility
+        if (!this._isZoneAllowedForVehicle(v.type, zoneObj.type)) {
+            console.error(`Vehicle ${v.type} cannot operate in ${zoneObj.type}`);
+            return false;
+        }
+
+        // 3. Assign Position (Geospatial)
+        const position = geoManager.getRandomPointInZone(targetZoneId);
+        if (!position) {
+            console.error(`Could not find valid position in ${targetZoneId}`);
+            return false;
+        }
+
+        v.status = VehicleStatus.ACTIVE;
+        v.currentZone = targetZoneId;
+        v.position = {
+            lat: position.lat,
+            lng: position.lng,
+            rotation: Math.random() * 360
+        };
+
+        return true;
+    }
+
+    _isZoneAllowedForVehicle(vehicleType, zoneType) {
+        const rules = {
+            [VehicleType.RALLA]: ['QUAY', 'ROAD', 'GATE', 'CONCRETE_PAD', 'LOADING', 'DEPOT'],
+            [VehicleType.REACH_STACKER]: ['YARD', 'CONCRETE_PAD', 'ROAD', 'LOADING', 'DEPOT', 'STANDARD', 'REEFER', 'IMO', 'DAMAGED'],
+            [VehicleType.STRADDLE_CARRIER]: ['YARD', 'CONCRETE_PAD', 'ROAD', 'LOADING', 'DEPOT', 'STANDARD', 'REEFER', 'IMO', 'DAMAGED']
+        };
+
+        // If generic type provided in rules
+        const allowed = rules[vehicleType] || [];
+        return allowed.includes(zoneType);
+    }
+
+    calculateTravelTime(vehicleId, targetZoneId, geoManager) {
+        const v = this.getVehicle(vehicleId);
+        if (!v) return 0;
+
+        let startPos = v.position;
+        // If no position (Idle/Initial), assume Depot Ralle center
+        if (!startPos || (startPos.lat === 0 && startPos.lng === 0)) {
+            startPos = geoManager.getZoneCenter('DEPOT_RALLE');
+        }
+        if (!startPos) return 0;
+
+        const targetCenter = geoManager.getZoneCenter(targetZoneId);
+        if (!targetCenter) return 0;
+
+        const distMeters = geoManager._distanceMeters(startPos, targetCenter);
+        const speedMps = 8.33; // ~30 km/h
+
+        return Math.ceil(distMeters / speedMps);
+    }
+
+    updateVehiclePosition(id, x, y, rotation = 0) {
         const v = this.getVehicle(id);
         if (v) {
-            v.status = VehicleStatus.ACTIVE;
-            v.currentZone = targetZone;
+            v.position = { x, y, rotation };
             return true;
         }
         return false;
@@ -69,6 +146,7 @@ export class FleetManager {
             v.status = VehicleStatus.IDLE;
             v.currentZone = 'DEPOT_RALLE';
             v.assignedBlock = null;
+            v.position = { x: 0, y: 0, rotation: 0 }; // Reset
             return true;
         }
         return false;

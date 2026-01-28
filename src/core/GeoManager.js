@@ -309,6 +309,74 @@ export class GeoManager {
         const zone = this.zones.find(z => z.id === zoneId);
         if (!zone) return null;
         if (zone.vertices) return zone.vertices;
-        return null;
+        return null; // Should handle non-polygon zones if any
+    }
+
+    getRandomPointInZone(zoneId) {
+        const zone = this.zones.find(z => z.id === zoneId);
+        if (!zone || !zone.vertices || zone.vertices.length < 3) return null;
+
+        // Simple Bounding Box approach for MVP
+        // (For more precision in non-rectangular rotated zones, we would use Ray Casting or similar)
+        let minLat = 90, maxLat = -90;
+        let minLng = 180, maxLng = -180;
+
+        zone.vertices.forEach(v => {
+            if (v.lat < minLat) minLat = v.lat;
+            if (v.lat > maxLat) maxLat = v.lat;
+            if (v.lng < minLng) minLng = v.lng;
+            if (v.lng > maxLng) maxLng = v.lng;
+        });
+
+        // Simple valid point finder (Try 10 times to find a point inside polygon)
+        for (let i = 0; i < 10; i++) {
+            const lat = minLat + Math.random() * (maxLat - minLat);
+            const lng = minLng + Math.random() * (maxLng - minLng);
+
+            if (this._isPointInPolygon({ lat, lng }, zone.vertices)) {
+                return { lat, lng };
+            }
+        }
+
+        // Fallback to center if efficient check fails
+        return {
+            lat: (minLat + maxLat) / 2,
+            lng: (minLng + maxLng) / 2
+        };
+    }
+
+    _isPointInPolygon(point, vs) {
+        // Ray-casting algorithm based on
+        // http://www.ecse.rpi.edu/Homepages/wrf/Research/Short_Notes/pnpoly.html
+
+        const x = point.lat, y = point.lng;
+
+        let inside = false;
+        for (let i = 0, j = vs.length - 1; i < vs.length; j = i++) {
+            const xi = vs[i].lat, yi = vs[i].lng;
+            const xj = vs[j].lat, yj = vs[j].lng;
+
+            const intersect = ((yi > y) !== (yj > y))
+                && (x < (xj - xi) * (y - yi) / (yj - yi) + xi);
+            if (intersect) inside = !inside;
+        }
+
+        return inside;
+    }
+
+    getZoneCenter(zoneId) {
+        const zone = this.zones.find(z => z.id === zoneId);
+        if (!zone || !zone.vertices) return null;
+
+        let latSum = 0, lngSum = 0;
+        zone.vertices.forEach(v => {
+            latSum += v.lat;
+            lngSum += v.lng;
+        });
+
+        return {
+            lat: latSum / zone.vertices.length,
+            lng: lngSum / zone.vertices.length
+        };
     }
 }
