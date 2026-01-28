@@ -12,21 +12,28 @@
     --ground-slot: #21262d;
 }
 
+/* Global Box Sizing */
 * {
     box-sizing: border-box;
 }
 
+html,
 body {
     margin: 0;
+    padding: 0;
+    width: 100%;
+    height: 100%;
+    /* Critical for 100vh child elements */
+    overflow: hidden;
+    /* Prevent global scrollbars */
     font-family: 'Inter', sans-serif;
     background-color: var(--bg-color);
     color: var(--text-primary);
+}
+
+body {
     display: flex;
     flex-direction: column;
-    height: 100vh;
-    width: 100vw;
-    /* Strict width */
-    overflow: hidden;
 }
 
 /* ... existing styles ... */
@@ -41,7 +48,11 @@ body {
     display: flex;
     flex-direction: column;
     overflow-y: auto;
-    height: 100%;
+    /* Height handled by flex stretch (align-items: stretch on main) */
+    max-height: 100%;
+    /* Safety cap */
+    min-height: 0;
+    /* CRITICAL: Enables scrolling when content overflows */
 }
 
 header {
@@ -53,6 +64,8 @@ header {
     align-items: center;
     flex-shrink: 0;
     /* Prevent header from shrinking */
+    min-height: 60px;
+    /* Explicit height helps calculation */
 }
 
 header h1 {
@@ -74,7 +87,13 @@ header h1 {
 main {
     display: flex;
     flex: 1;
+    /* Take remaining space */
     overflow: hidden;
+    /* Contain children */
+    min-height: 0;
+    /* CRITICAL: Allow flex container to shrink below content size */
+    position: relative;
+    width: 100%;
 }
 
 #yard-container {
@@ -85,9 +104,20 @@ main {
     background-color: #0d1117;
     /* Ensure background matches */
     cursor: grab;
+    min-height: 0;
+    /* Enable shrinking below content size */
 }
 
-#yard-container:active {
+/* Canvas fills the container */
+#yard-canvas {
+    display: block;
+    width: 100%;
+    height: 100%;
+    /* We handle cursor in JS now, but grab is a good default */
+    cursor: grab;
+}
+
+#yard-canvas:active {
     cursor: grabbing;
 }
 
@@ -206,18 +236,6 @@ input[type=range] {
     padding: 1px 4px;
     border-radius: 10px;
     z-index: 3;
-}
-
-#info-panel {
-    width: 300px;
-    background-color: var(--panel-bg);
-    border-left: 1px solid var(--border-color);
-    padding: 1.5rem;
-    display: flex;
-    flex-direction: column;
-    overflow-y: auto;
-    height: 100%;
-    /* Force full height to trigger overflow */
 }
 
 #info-panel h2 {

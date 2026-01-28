@@ -4,7 +4,7 @@ export class MapControls {
         this.content = document.getElementById(contentId);
 
         // State
-        this.scale = 1;
+        this.scale = 0.8; // User requested reduced zoom
         this.panning = false;
         this.pointX = 0;
         this.pointY = 0;
@@ -109,6 +109,6 @@ export class MapControls {
         // we can just reset our dynamic offsets to 0.
         this.transformX = 0;
         this.transformY = 0;
-        this.setScale(1);
+        this.setScale(0.8);
     }
 }

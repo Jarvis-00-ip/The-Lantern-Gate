@@ -39,8 +39,71 @@ export class ControlPanel {
         this.btnSearch.addEventListener('click', () => this.handleSearch());
 
         // State
+        this.currentZoneId = null;
         this.moveMode = false;
         this.moveSource = null;
+
+        // Create Zone Dropdown
+        const headerGroup = document.createElement('div');
+        headerGroup.className = 'control-group';
+        headerGroup.style.marginBottom = '0.5rem';
+        headerGroup.innerHTML = `
+            <label>Operational Area</label>
+            <select id="sel-current-zone" style="background:#21262d; border:1px solid var(--border-color); color:var(--accent-color); font-weight:bold;">
+                <option value="">Select Zone...</option>
+            </select>
+        `;
+        // Insert before Location group
+        const locationGroup = this.inpBay.closest('.control-group');
+        locationGroup.parentNode.insertBefore(headerGroup, locationGroup);
+
+        this.selZone = document.getElementById('sel-current-zone');
+
+        // Listener for Dropdown
+        this.selZone.addEventListener('change', (e) => {
+            if (e.target.value) {
+                this.setZone(e.target.value);
+                // Also trigger map feedback if needed (optional, circle back to renderer?)
+            }
+        });
+    }
+
+    /**
+     * Populates the zone dropdown with available zones.
+     * @param {Array} zones - List of zone objects
+     */
+    populateZones(zones) {
+        // Clear existing except first
+        this.selZone.innerHTML = '<option value="">Select Zone...</option>';
+
+        // Filter for storage/interesting zones only? Or all? 
+        // Let's show all for now, or maybe just storage.
+        // User asked to select "Operational Area".
+        zones.forEach(z => {
+            const opt = document.createElement('option');
+            opt.value = z.id;
+            opt.textContent = `${z.id} (${z.type})`;
+            this.selZone.appendChild(opt);
+        });
+    }
+
+    /**
+     * Sets the active zone for operations.
+     * @param {string} zoneId 
+     */
+    setZone(zoneId) {
+        this.currentZoneId = zoneId;
+
+        // Sync Dropdown (if set externally e.g. from Map click)
+        if (this.selZone.value !== zoneId) {
+            this.selZone.value = zoneId;
+        }
+
+        console.log(`[ControlPanel] Zone set to ${zoneId}`);
+        // Reset inputs to 1-1
+        this.inpBay.value = 1;
+        this.inpRow.value = 1;
+        this.checkStates();
     }
 
     /**
@@ -74,34 +137,38 @@ export class ControlPanel {
     }
 
     handleMoveSelection(bay, row) {
+        if (!this.currentZoneId) {
+            alert("Please select a zone first!");
+            return;
+        }
+
         if (!this.moveSource) {
             // Select Source
-            const stackHeight = this.yard.getStackHeight(bay, row);
+            const stackHeight = this.yard.getStackHeight(this.currentZoneId, bay, row);
             if (stackHeight === 0) {
                 alert("Source stack is empty!");
                 return;
             }
-            this.moveSource = { bay, row };
-            this.moveStatus.textContent = `Source: Bay ${bay}, Row ${row}. Select Destination...`;
-            // Visual feedback could be added here (e.g. highlight)
+            this.moveSource = { zone: this.currentZoneId, bay, row };
+            this.moveStatus.textContent = `Source: ${this.currentZoneId} ${bay}-${row}. Select Destination...`;
             console.log("Move Source Selected:", this.moveSource);
         } else {
             // Select Destination and Execute
-            if (this.moveSource.bay === bay && this.moveSource.row === row) {
+            if (this.moveSource.zone === this.currentZoneId && this.moveSource.bay === bay && this.moveSource.row === row) {
                 alert("Cannot move to the same stack!");
                 return;
             }
-            this.executeMove(this.moveSource.bay, this.moveSource.row, bay, row);
+            this.executeMove(this.moveSource.zone, this.moveSource.bay, this.moveSource.row, this.currentZoneId, bay, row);
         }
     }
 
-    executeMove(fromBay, fromRow, toBay, toRow) {
-        const success = this.yard.moveContainer(fromBay, fromRow, toBay, toRow);
+    executeMove(fromZone, fromBay, fromRow, toZone, toBay, toRow) {
+        const success = this.yard.moveContainer(fromZone, fromBay, fromRow, toZone, toBay, toRow);
 
         if (success) {
-            console.log(`Moved container from ${fromBay}-${fromRow} to ${toBay}-${toRow}`);
-            this.refresh(fromBay, fromRow); // Refresh source
-            this.refresh(toBay, toRow);     // Refresh dest
+            console.log(`Moved container from ${fromZone}:${fromBay}-${fromRow} to ${toZone}:${toBay}-${toRow}`);
+            this.refresh(fromZone, fromBay, fromRow); // Refresh source
+            this.refresh(toZone, toBay, toRow);     // Refresh dest
 
             // Exit move mode
             this.toggleMoveMode();
@@ -120,26 +187,38 @@ export class ControlPanel {
         const result = this.yard.findContainer(id);
         if (result) {
             console.log("Found container:", result);
+
+            // Switch zone if needed
+            if (result.zoneId !== this.currentZoneId) {
+                this.setZone(result.zoneId);
+            }
+
             // Select the found stack
             this.setTarget(result.bay, result.row);
-            // Force info panel update directly to show the specific stack if not in move mode
-            if (!this.moveMode && this.selectionInfoCallback) {
+
+            // Force info panel update directly
+            if (this.selectionInfoCallback) {
                 this.selectionInfoCallback(result.bay, result.row);
             }
-            // Optional: Highlight logic could be pushed to renderer
-            alert(`Container ${result.container.id} found at Bay ${result.bay}, Row ${result.row}, Tier ${result.tier}`);
+            alert(`Container ${result.container.id} found in ${result.zoneId} at Bay ${result.bay}, Row ${result.row}, Tier ${result.tier}`);
         } else {
             alert(`Container ${id} not found.`);
         }
     }
 
     checkStates() {
+        if (!this.currentZoneId) {
+            this.btnAdd.disabled = true;
+            this.btnRemove.disabled = true;
+            return;
+        }
+
         const bay = parseInt(this.inpBay.value);
         const row = parseInt(this.inpRow.value);
 
         if (isNaN(bay) || isNaN(row)) return;
 
-        const height = this.yard.getStackHeight(bay, row);
+        const height = this.yard.getStackHeight(this.currentZoneId, bay, row);
         const max = this.yard.maxTiers;
 
         // Smart Buttons Logic
@@ -159,6 +238,11 @@ export class ControlPanel {
     }
 
     handleAdd() {
+        if (!this.currentZoneId) {
+            alert("Please select a Zone from the map first.");
+            return;
+        }
+
         const bay = parseInt(this.inpBay.value);
         const row = parseInt(this.inpRow.value);
         const id = this.inpId.value;
@@ -170,11 +254,11 @@ export class ControlPanel {
         }
 
         const container = new Container(id, type);
-        const success = this.yard.addContainer(container, bay, row);
+        const success = this.yard.addContainer(container, this.currentZoneId, bay, row);
 
         if (success) {
-            console.log(`Added ${id} to Bay ${bay}, Row ${row}`);
-            this.refresh(bay, row);
+            console.log(`Added ${id} to ${this.currentZoneId} Bay ${bay}, Row ${row}`);
+            this.refresh(this.currentZoneId, bay, row);
 
             // Auto-increment ID for convenience
             const numericPart = id.match(/\d+/);
@@ -189,27 +273,30 @@ export class ControlPanel {
     }
 
     handleRemove() {
+        if (!this.currentZoneId) return;
+
         const bay = parseInt(this.inpBay.value);
         const row = parseInt(this.inpRow.value);
 
-        const removed = this.yard.removeContainer(bay, row);
+        const removed = this.yard.removeContainer(this.currentZoneId, bay, row);
 
         if (removed) {
-            console.log(`Removed ${removed.id} from Bay ${bay}, Row ${row}`);
-            this.refresh(bay, row);
+            console.log(`Removed ${removed.id} from ${this.currentZoneId} Bay ${bay}, Row ${row}`);
+            this.refresh(this.currentZoneId, bay, row);
         } else {
             alert(`No container to remove at Bay ${bay}, Row ${row}.`);
         }
     }
 
-    refresh(bay, row) {
-        // 1. Re-render Grid
+    refresh(zoneId, bay, row) {
+        // 1. Re-render Grid (if we had one)
         if (this.renderCallback) {
             this.renderCallback();
         }
 
-        // 2. Update Inspection Panel (force refresh of the current target)
-        if (this.selectionInfoCallback) {
+        // 2. Update Inspection Panel
+        // Only update if we are looking at the same zone
+        if (this.selectionInfoCallback && this.currentZoneId === zoneId) {
             this.selectionInfoCallback(bay, row);
         }
 

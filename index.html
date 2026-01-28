@@ -6,6 +6,18 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>The Lantern Gate - Yard Viewer</title>
     <link rel="stylesheet" href="src/ui/styles.css">
+    <link rel="stylesheet" href="src/ui/floating.css">
+    <link rel="stylesheet" href="src/ui/toggle.css">
+    <!-- Leaflet CDN -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css"
+        integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin="" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"
+        integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+    <!-- Leaflet-Geoman (Drawing/Editing) -->
+    <link rel="stylesheet" href="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.css" />
+    <script src="https://unpkg.com/@geoman-io/leaflet-geoman-free@latest/dist/leaflet-geoman.min.js"></script>
+
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
 </head>
 
@@ -16,15 +28,22 @@
             <div class="status-bar">
                 <span>System: <span class="status-ok">ONLINE</span></span>
                 <span>Yard MVP: <span class="version">0.1.0</span></span>
+                <div class="mode-toggle">
+                    <label class="switch">
+                        <input type="checkbox" id="mode-switch">
+                        <span class="slider round"></span>
+                    </label>
+                    <span id="mode-label">TEST MODE</span>
+                </div>
             </div>
         </header>
 
         <main>
             <div id="yard-container">
-                <!-- The Grid will be rendered here by renderer.js -->
-                <div id="yard-view" class="yard-grid"></div>
+                <!-- Canvas Engine Entry Point -->
+                <div id="map-view" style="width: 100%; height: 100%; background: #0d1117;"></div>
 
-                <!-- Map Controls Overlay -->
+                <!-- Map Controls Overlay (UI on top of Canvas) -->
                 <div class="map-controls">
                     <div class="slider-container">
                         <label for="zoom-slider" style="font-size: 0.8rem; color: var(--text-secondary);">Zoom</label>

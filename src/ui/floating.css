@@ -1,0 +1,54 @@
+/* Floating Inspector Menu */
+.floating-menu {
+    position: absolute;
+    top: 50px;
+    left: 50px;
+    width: 280px;
+    background-color: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5);
+    display: none;
+    /* Hidden by default */
+    flex-direction: column;
+    z-index: 9999;
+    max-height: 400px;
+    overflow: hidden;
+    font-size: 0.9rem;
+}
+
+.floating-header {
+    background-color: #21262d;
+    padding: 10px;
+    cursor: move;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    border-bottom: 1px solid var(--border-color);
+    font-weight: bold;
+    color: var(--text-primary);
+}
+
+.floating-content {
+    padding: 10px;
+    overflow-y: auto;
+    flex: 1;
+}
+
+.floating-controls {
+    display: flex;
+    gap: 5px;
+}
+
+.close-btn {
+    background: none;
+    border: none;
+    color: var(--text-secondary);
+    cursor: pointer;
+    font-size: 1.1rem;
+    padding: 0 4px;
+}
+
+.close-btn:hover {
+    color: var(--text-primary);
+}

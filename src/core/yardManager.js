@@ -34,24 +34,26 @@ export class Yard {
     }
 
     /**
-     * Genera una chiave univoca per lo slot a terra (Bay + Row)
+     * Genera una chiave univoca per lo slot a terra (Zone + Bay + Row)
+     * @param {string} zoneId 
      * @param {number} bay 
      * @param {number} row 
      * @returns {string} Key
      */
-    _getStackKey(bay, row) {
-        return `${bay}-${row}`;
+    _getStackKey(zoneId, bay, row) {
+        return `${zoneId}:${bay}-${row}`;
     }
 
     /**
      * Aggiunge un container in una specifica posizione.
      * @param {Container} container 
+     * @param {string} zoneId
      * @param {number} bay 
      * @param {number} row 
      * @returns {boolean} Successo dell'operazione
      */
-    addContainer(container, bay, row) {
-        const key = this._getStackKey(bay, row);
+    addContainer(container, zoneId, bay, row) {
+        const key = this._getStackKey(zoneId, bay, row);
 
         if (!this.stacks.has(key)) {
             this.stacks.set(key, []);
@@ -60,7 +62,7 @@ export class Yard {
         const stack = this.stacks.get(key);
 
         if (stack.length >= this.maxTiers) {
-            console.error(`Stack full at Bay ${bay}, Row ${row}`);
+            console.error(`Stack full at ${zoneId} Bay ${bay}, Row ${row}`);
             return false;
         }
 
@@ -70,12 +72,13 @@ export class Yard {
 
     /**
      * Rimuove il container in cima alla pila (LIFO).
+     * @param {string} zoneId
      * @param {number} bay 
      * @param {number} row 
      * @returns {Container|null} Il container rimosso o null se stack vuoto
      */
-    removeContainer(bay, row) {
-        const key = this._getStackKey(bay, row);
+    removeContainer(zoneId, bay, row) {
+        const key = this._getStackKey(zoneId, bay, row);
         const stack = this.stacks.get(key);
 
         if (!stack || stack.length === 0) {
@@ -85,85 +88,56 @@ export class Yard {
         return stack.pop();
     }
 
-
-
     /**
      * Restituisce l'altezza dello stack in una data posizione.
+     * @param {string} zoneId
      * @param {number} bay 
      * @param {number} row 
      * @returns {number} Numero di container
      */
-    getStackHeight(bay, row) {
-        const key = this._getStackKey(bay, row);
+    getStackHeight(zoneId, bay, row) {
+        const key = this._getStackKey(zoneId, bay, row);
         const stack = this.stacks.get(key);
         return stack ? stack.length : 0;
     }
 
     /**
-     * Calcola la "Digging Penalty": quanti container devono essere spostati per prendere il target.
-     * @param {number} bay 
-     * @param {number} row 
-     * @param {number} targetTier - Il tier (0-indexed) dove si trova il container target (0 è il ground)
-     * @returns {number} Numero di movimenti extra (digs)
-     */
-    calculateDiggingPenalty(bay, row, targetTier) {
-        const key = this._getStackKey(bay, row);
-        const stack = this.stacks.get(key);
-
-        if (!stack) {
-            return 0; // Stack vuoto o inesistente
-        }
-
-        // Il container target esiste?
-        if (targetTier < 0 || targetTier >= stack.length) {
-            // Potremmo lanciare errore, ma per ora ritorniamo 0 o -1 per indicare "non trovato" logicamente
-            return 0;
-        }
-
-        // I container sopra il target sono quelli da "scavare"
-        // Esempio: Stack size 5. Target a tier 1. 
-        // Indici: 0, 1 (target), 2, 3, 4.
-        // Container sopra: 2, 3, 4 -> Totale 3.
-        // Formula: (stack.length - 1) - targetTier
-
-        return (stack.length - 1) - targetTier;
-    }
-
-    /**
      * Helper per ottenere un container (utile per test)
      */
-    getContainer(bay, row, tier) {
-        const key = this._getStackKey(bay, row);
+    getContainer(zoneId, bay, row, tier) {
+        const key = this._getStackKey(zoneId, bay, row);
         const stack = this.stacks.get(key);
         if (stack && stack[tier]) {
             return stack[tier];
         }
         return null;
     }
+
     /**
      * Sposta un container da uno stack all'altro.
+     * @param {string} fromZone
      * @param {number} fromBay 
      * @param {number} fromRow 
+     * @param {string} toZone
      * @param {number} toBay 
      * @param {number} toRow 
      * @returns {boolean} Successo
      */
-    moveContainer(fromBay, fromRow, toBay, toRow) {
-        const sourceKey = this._getStackKey(fromBay, fromRow);
-        const destKey = this._getStackKey(toBay, toRow);
+    moveContainer(fromZone, fromBay, fromRow, toZone, toBay, toRow) {
+        const sourceKey = this._getStackKey(fromZone, fromBay, fromRow);
+        const destKey = this._getStackKey(toZone, toBay, toRow);
 
         // Controllo esistenza stack sorgente
         const sourceStack = this.stacks.get(sourceKey);
         if (!sourceStack || sourceStack.length === 0) {
-            console.error(`Move Failed: Source stack empty at ${fromBay}-${fromRow}`);
+            console.error(`Move Failed: Source stack empty`);
             return false;
         }
 
         // Controllo capacità stack destinazione
-        // Nota: se la chiave non esiste, lo stack è vuoto (len 0), quindi ok.
         let destStack = this.stacks.get(destKey);
         if (destStack && destStack.length >= this.maxTiers) {
-            console.error(`Move Failed: Destination stack full at ${toBay}-${toRow}`);
+            console.error(`Move Failed: Destination stack full`);
             return false;
         }
 
@@ -177,7 +151,7 @@ export class Yard {
         }
         destStack.push(container);
 
-        // Pulizia se stack sorgente diventa vuoto (opzionale, ma mantiene la map pulita)
+        // Pulizia
         if (sourceStack.length === 0) {
             this.stacks.delete(sourceKey);
         }
@@ -188,7 +162,7 @@ export class Yard {
     /**
      * Cerca un container per ID.
      * @param {string} id 
-     * @returns {Object|null} { bay, row, tier, container } oppure null
+     * @returns {Object|null} { zoneId, bay, row, tier, container } oppure null
      */
     findContainer(id) {
         if (!id) return null;
@@ -197,16 +171,44 @@ export class Yard {
         for (const [key, stack] of this.stacks.entries()) {
             for (let i = 0; i < stack.length; i++) {
                 if (stack[i].id.toUpperCase() === searchId) {
-                    const [bay, row] = key.split('-').map(Number);
+                    const [zoneId, coords] = key.split(':');
+                    const [bay, row] = coords.split('-').map(Number);
                     return {
+                        zoneId,
                         bay,
                         row,
-                        tier: i, // 0-indexed da terra
+                        tier: i,
                         container: stack[i]
                     };
                 }
             }
         }
         return null;
+    }
+    /**
+     * Retrieves all containers within a specific zone.
+     * @param {string} zoneId 
+     * @returns {Array} List of container objects with location info
+     */
+    getContainersInZone(zoneId) {
+        const results = [];
+        const prefix = `${zoneId}:`;
+
+        for (const [key, stack] of this.stacks.entries()) {
+            if (key.startsWith(prefix)) {
+                const [_, coords] = key.split(':');
+                const [bay, row] = coords.split('-').map(Number);
+
+                stack.forEach((container, index) => {
+                    results.push({
+                        ...container,
+                        bay,
+                        row,
+                        tier: index
+                    });
+                });
+            }
+        }
+        return results;
     }
 }
