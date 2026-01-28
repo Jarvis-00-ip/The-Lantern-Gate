@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>The Lantern Gate - Yard Viewer</title>
+    <link rel="stylesheet" href="src/ui/styles.css">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;600;700&display=swap" rel="stylesheet">
+</head>
+
+<body>
+    <div id="app">
+        <header>
+            <h1>⚓ The Lantern Gate</h1>
+            <div class="status-bar">
+                <span>System: <span class="status-ok">ONLINE</span></span>
+                <span>Yard MVP: <span class="version">0.1.0</span></span>
+            </div>
+        </header>
+
+        <main>
+            <div id="yard-container">
+                <!-- The Grid will be rendered here by renderer.js -->
+                <div id="yard-view" class="yard-grid"></div>
+            </div>
+
+            <aside id="info-panel">
+                <div id="control-panel-container"
+                    style="margin-bottom: 2rem; padding-bottom: 2rem; border-bottom: 1px solid var(--border-color);">
+                    <h2>Control Ops</h2>
+
+                    <div class="control-group">
+                        <label>Location</label>
+                        <small class="helper-text">Target coordinates (Bay 1-5, Row 1-4)</small>
+                        <div style="display: flex; gap: 5px;">
+                            <input type="number" id="inp-bay" placeholder="Bay" min="1" max="5" value="1">
+                            <input type="number" id="inp-row" placeholder="Row" min="1" max="4" value="1">
+                        </div>
+                    </div>
+
+                    <div class="control-group">
+                        <label>Container</label>
+                        <small class="helper-text">Details for the new container</small>
+                        <input type="text" id="inp-id" placeholder="ID (e.g. MSCU...)" value="NEW001">
+                        <select id="inp-type">
+                            <option value="Standard">Standard</option>
+                            <option value="Reefer">Reefer</option>
+                            <option value="IMO">IMO</option>
+                        </select>
+                    </div>
+
+                    <div class="actions">
+                        <button id="btn-add" class="btn btn-primary">Add</button>
+                        <button id="btn-remove" class="btn btn-danger">Remove Top</button>
+                    </div>
+                </div>
+
+                <h2>Inspection</h2>
+                <div id="selected-info">
+                    <p class="placeholder">Select a stack to view details</p>
+                </div>
+            </aside>
+        </main>
+    </div>
+
+    <!-- Application Entry Point -->
+    <script type="module" src="src/ui/app.js"></script>
+</body>
+
+</html>

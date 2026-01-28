@@ -29,7 +29,7 @@ export class Yard {
     constructor() {
         // La struttura dello yard è una mappa di Bay -> Row -> Tier
         // Per semplicità nell'MVP, useremo una mappa piatta con chiave "Bay-Row" che contiene un array (stack) rappresentante i Tier
-        this.stacks = new Map(); 
+        this.stacks = new Map();
         this.maxTiers = 5; // Altezza massima di impilamento
     }
 
@@ -52,7 +52,7 @@ export class Yard {
      */
     addContainer(container, bay, row) {
         const key = this._getStackKey(bay, row);
-        
+
         if (!this.stacks.has(key)) {
             this.stacks.set(key, []);
         }
@@ -66,6 +66,37 @@ export class Yard {
 
         stack.push(container);
         return true;
+    }
+
+    /**
+     * Rimuove il container in cima alla pila (LIFO).
+     * @param {number} bay 
+     * @param {number} row 
+     * @returns {Container|null} Il container rimosso o null se stack vuoto
+     */
+    removeContainer(bay, row) {
+        const key = this._getStackKey(bay, row);
+        const stack = this.stacks.get(key);
+
+        if (!stack || stack.length === 0) {
+            return null;
+        }
+
+        return stack.pop();
+    }
+
+
+
+    /**
+     * Restituisce l'altezza dello stack in una data posizione.
+     * @param {number} bay 
+     * @param {number} row 
+     * @returns {number} Numero di container
+     */
+    getStackHeight(bay, row) {
+        const key = this._getStackKey(bay, row);
+        const stack = this.stacks.get(key);
+        return stack ? stack.length : 0;
     }
 
     /**
@@ -85,8 +116,8 @@ export class Yard {
 
         // Il container target esiste?
         if (targetTier < 0 || targetTier >= stack.length) {
-             // Potremmo lanciare errore, ma per ora ritorniamo 0 o -1 per indicare "non trovato" logicamente
-             return 0; 
+            // Potremmo lanciare errore, ma per ora ritorniamo 0 o -1 per indicare "non trovato" logicamente
+            return 0;
         }
 
         // I container sopra il target sono quelli da "scavare"
@@ -94,7 +125,7 @@ export class Yard {
         // Indici: 0, 1 (target), 2, 3, 4.
         // Container sopra: 2, 3, 4 -> Totale 3.
         // Formula: (stack.length - 1) - targetTier
-        
+
         return (stack.length - 1) - targetTier;
     }
 
@@ -102,11 +133,11 @@ export class Yard {
      * Helper per ottenere un container (utile per test)
      */
     getContainer(bay, row, tier) {
-         const key = this._getStackKey(bay, row);
-         const stack = this.stacks.get(key);
-         if (stack && stack[tier]) {
-             return stack[tier];
-         }
-         return null;
+        const key = this._getStackKey(bay, row);
+        const stack = this.stacks.get(key);
+        if (stack && stack[tier]) {
+            return stack[tier];
+        }
+        return null;
     }
 }

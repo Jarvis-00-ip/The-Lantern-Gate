@@ -1,0 +1,18 @@
+{
+  "name": "the-lantern-gate",
+  "version": "0.1.0",
+  "description": "Port of Genoa Terminal Simulator",
+  "main": "src/core/yardManager.js",
+  "scripts": {
+    "start": "npx serve .",
+    "test": "node test_yard.js"
+  },
+  "keywords": [
+    "simulation",
+    "port",
+    "logistics"
+  ],
+  "author": "",
+  "license": "ISC",
+  "type": "module"
+}

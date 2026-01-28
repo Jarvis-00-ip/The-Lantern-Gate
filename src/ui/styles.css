@@ -1,0 +1,248 @@
+:root {
+    --bg-color: #0d1117;
+    --panel-bg: #161b22;
+    --text-primary: #c9d1d9;
+    --text-secondary: #8b949e;
+    --accent-color: #58a6ff;
+    --border-color: #30363d;
+
+    --container-std: #1f6feb;
+    --container-reefer: #f0f6fc;
+    --container-imo: #da3633;
+    --ground-slot: #21262d;
+}
+
+body {
+    margin: 0;
+    font-family: 'Inter', sans-serif;
+    background-color: var(--bg-color);
+    color: var(--text-primary);
+    display: flex;
+    flex-direction: column;
+    height: 100vh;
+    overflow: hidden;
+}
+
+header {
+    background-color: var(--panel-bg);
+    border-bottom: 1px solid var(--border-color);
+    padding: 1rem 2rem;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+}
+
+header h1 {
+    margin: 0;
+    font-size: 1.2rem;
+    font-weight: 600;
+}
+
+.status-bar {
+    font-size: 0.85rem;
+    color: var(--text-secondary);
+}
+
+.status-ok {
+    color: #3fb950;
+    font-weight: bold;
+}
+
+main {
+    display: flex;
+    flex: 1;
+    overflow: hidden;
+}
+
+#yard-container {
+    flex: 1;
+    padding: 2rem;
+    overflow: auto;
+    display: flex;
+    justify-content: center;
+    align-items: start;
+}
+
+.yard-grid {
+    display: grid;
+    gap: 10px;
+    padding: 20px;
+    background-color: #1c2128;
+    border: 1px solid var(--border-color);
+    border-radius: 6px;
+    /* Grid columns will be set dynamically via JS */
+}
+
+/* A single stack (slot on the ground) */
+.stack {
+    width: 60px;
+    height: 60px;
+    background-color: var(--ground-slot);
+    border: 1px dashed var(--border-color);
+    border-radius: 4px;
+    position: relative;
+    cursor: pointer;
+    transition: transform 0.1s ease;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+}
+
+.stack:hover {
+    border-color: var(--accent-color);
+    transform: scale(1.05);
+}
+
+/* Visualization of the top container */
+.container-view {
+    width: 90%;
+    height: 90%;
+    border-radius: 3px;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    font-weight: bold;
+    color: white;
+    box-shadow: 0 2px 4px rgba(0, 0, 0, 0.5);
+    z-index: 2;
+}
+
+.type-Standard {
+    background-color: var(--container-std);
+}
+
+.type-Reefer {
+    background-color: var(--container-reefer);
+    color: #0d1117;
+    /* Dark text for light container */
+    border: 2px solid #3fb950;
+    /* Green accent for "Active" reefer */
+}
+
+.type-IMO {
+    background-color: var(--container-imo);
+    background-image: repeating-linear-gradient(45deg,
+            transparent,
+            transparent 5px,
+            rgba(0, 0, 0, 0.2) 5px,
+            rgba(0, 0, 0, 0.2) 10px);
+}
+
+/* Badge for stack height */
+.stack-count {
+    position: absolute;
+    top: -5px;
+    right: -5px;
+    background-color: var(--panel-bg);
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    font-size: 0.7rem;
+    padding: 1px 4px;
+    border-radius: 10px;
+    z-index: 3;
+}
+
+#info-panel {
+    width: 300px;
+    background-color: var(--panel-bg);
+    border-left: 1px solid var(--border-color);
+    padding: 1.5rem;
+    display: flex;
+    flex-direction: column;
+}
+
+#info-panel h2 {
+    font-size: 1rem;
+    margin-top: 0;
+    color: var(--text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 1px;
+}
+
+.placeholder {
+    font-style: italic;
+    color: var(--text-secondary);
+}
+
+/* Info Details */
+.info-row {
+    margin-bottom: 0.5rem;
+    font-size: 0.9rem;
+}
+
+.label {
+    color: var(--text-secondary);
+}
+
+/* Control Panel Inputs */
+.control-group {
+    margin-bottom: 1rem;
+}
+
+.control-group label {
+    display: block;
+    font-size: 0.9rem;
+    font-weight: 600;
+    color: var(--text-primary);
+    margin-bottom: 2px;
+}
+
+.helper-text {
+    display: block;
+    font-size: 0.75rem;
+    color: var(--text-secondary);
+    margin-bottom: 8px;
+    font-style: italic;
+}
+
+input,
+select {
+    background-color: #0d1117;
+    border: 1px solid var(--border-color);
+    color: var(--text-primary);
+    padding: 6px;
+    border-radius: 4px;
+    width: 100%;
+    box-sizing: border-box;
+    font-family: inherit;
+}
+
+input:focus,
+select:focus {
+    outline: none;
+    border-color: var(--accent-color);
+}
+
+.actions {
+    display: flex;
+    gap: 10px;
+    margin-top: 10px;
+}
+
+.btn {
+    flex: 1;
+    padding: 8px;
+    border: none;
+    border-radius: 4px;
+    cursor: pointer;
+    font-weight: 600;
+    font-size: 0.85rem;
+    transition: opacity 0.2s;
+}
+
+.btn:hover {
+    opacity: 0.9;
+}
+
+.btn-primary {
+    background-color: var(--accent-color);
+    color: white;
+}
+
+.btn-danger {
+    background-color: var(--container-imo);
+    /* Red */
+    color: white;
+}
