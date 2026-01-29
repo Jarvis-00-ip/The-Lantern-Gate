@@ -167,6 +167,15 @@ export class GeoManager {
                 ]
             },
             {
+                id: 'OCR_GATE', type: 'GATE', description: 'Pre-Gate Auto Scanner',
+                vertices: [
+                    { "lat": 44.406584, "lng": 8.907822 },
+                    { "lat": 44.406652, "lng": 8.907822 },
+                    { "lat": 44.406652, "lng": 8.907897 },
+                    { "lat": 44.406584, "lng": 8.907897 }
+                ]
+            },
+            {
                 id: 'GATE_OOG', type: 'GATE', description: 'Fuori Sagoma',
                 vertices: [
                     { "lat": 44.406271, "lng": 8.907463 },

@@ -29,11 +29,13 @@ export class FleetManager {
 
     initMockFleet() {
         // Create some initial vehicles
-        for (let i = 1; i <= 5; i++) {
+        // 25 Ralle (Terminal Tractors)
+        for (let i = 1; i <= 25; i++) {
             this.vehicles.push(new Vehicle(`R-${100 + i}`, VehicleType.RALLA));
         }
-        for (let i = 1; i <= 2; i++) {
-            this.vehicles.push(new Vehicle(`RS-${20 + i}`, VehicleType.REACH_STACKER));
+        // 25 Reach Stackers
+        for (let i = 1; i <= 25; i++) {
+            this.vehicles.push(new Vehicle(`RS-${200 + i}`, VehicleType.REACH_STACKER));
         }
     }
 

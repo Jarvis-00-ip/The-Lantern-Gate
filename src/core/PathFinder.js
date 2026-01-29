@@ -22,13 +22,14 @@ export class PathFinder {
         let nodeIdCounter = 0;
         // Optimization: Use a simple list for brute-force distance check (N is small < 1000)
 
-        const SNAP_DISTANCE_METERS = 10; // Aggressive snapping to connect loose ends
+        const SNAP_ENDPOINT = 12; // Connect loose ends (endpoints only)
+        const SNAP_INTERNAL = 1;  // Strict shape preservation (1m precision)
 
-        const getOrCreateNode = (lat, lng) => {
+        const getOrCreateNode = (lat, lng, snapRadius) => {
             // 1. Check if an existing node is very close
             const candidate = { lat, lng };
             for (const node of this.nodes) {
-                if (this.geoManager._distanceMeters(node, candidate) < SNAP_DISTANCE_METERS) {
+                if (this.geoManager._distanceMeters(node, candidate) < snapRadius) {
                     return node;
                 }
             }
@@ -40,9 +41,14 @@ export class PathFinder {
             return node;
         };
 
-        const MAX_SEGMENT_LEN = 15; // Meters
+        const MAX_SEGMENT_LEN = 5; // High fidelity curves (5m segments)
+
+        const excludedTypes = ['construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished'];
 
         roadSegments.forEach(road => {
+            const type = road.properties ? road.properties.type : 'unknown';
+            if (excludedTypes.includes(type)) return; // Skip unusable roads
+
             const segment = road.path;
             const oneWay = road.properties ? road.properties.oneWay : false;
 
@@ -52,10 +58,14 @@ export class PathFinder {
 
                 const totalDist = this.geoManager._distanceMeters(start, end);
 
+                // Determine Snap Radius for Start Node
+                // Only snap aggressively if it's the very first point of the Way
+                const snapA = (i === 0) ? SNAP_ENDPOINT : SNAP_INTERNAL;
+                let prevNode = getOrCreateNode(start.lat, start.lng, snapA);
+
                 // Densification: Split long segments
                 if (totalDist > MAX_SEGMENT_LEN) {
                     const steps = Math.ceil(totalDist / MAX_SEGMENT_LEN);
-                    let prevNode = getOrCreateNode(start.lat, start.lng);
 
                     for (let s = 1; s <= steps; s++) {
                         const t = s / steps;
@@ -63,7 +73,16 @@ export class PathFinder {
                         const lat = start.lat + (end.lat - start.lat) * t;
                         const lng = start.lng + (end.lng - start.lng) * t;
 
-                        const currentNode = getOrCreateNode(lat, lng);
+                        // Determine Snap Radius
+                        // If it's the final step, it represents the 'end' node of the segment
+                        let currentSnap = SNAP_INTERNAL;
+                        if (s === steps) {
+                            // It's the segment endpoint. Check if it's the ROAD endpoint.
+                            const isLastPoint = (i + 1 === segment.length - 1);
+                            currentSnap = isLastPoint ? SNAP_ENDPOINT : SNAP_INTERNAL;
+                        }
+
+                        const currentNode = getOrCreateNode(lat, lng, currentSnap);
 
                         // Link prev -> current
                         const dist = this.geoManager._distanceMeters(prevNode, currentNode);
@@ -84,15 +103,19 @@ export class PathFinder {
 
                 } else {
                     // Standard Link
-                    const nodeA = getOrCreateNode(start.lat, start.lng);
-                    const nodeB = getOrCreateNode(end.lat, end.lng);
+                    // Determine Snap Radius for End Node
+                    // Only snap aggressively if it's the very last point of the Way
+                    const isLastPoint = (i + 1 === segment.length - 1);
+                    const snapB = isLastPoint ? SNAP_ENDPOINT : SNAP_INTERNAL;
 
-                    if (nodeA.id === nodeB.id) continue;
+                    const nodeB = getOrCreateNode(end.lat, end.lng, snapB);
 
-                    const dist = this.geoManager._distanceMeters(nodeA, nodeB);
+                    if (prevNode.id === nodeB.id) continue;
+
+                    const dist = this.geoManager._distanceMeters(prevNode, nodeB);
 
                     // Forward Edge (A -> B)
-                    const neighborsA = this.graph.get(nodeA.id);
+                    const neighborsA = this.graph.get(prevNode.id);
                     if (!neighborsA.some(n => n.node.id === nodeB.id)) {
                         neighborsA.push({ node: nodeB, weight: dist });
                     }
@@ -100,15 +123,15 @@ export class PathFinder {
                     // Backward Edge (B -> A) - Only if NOT one-way
                     if (!oneWay) {
                         const neighborsB = this.graph.get(nodeB.id);
-                        if (!neighborsB.some(n => n.node.id === nodeA.id)) {
-                            neighborsB.push({ node: nodeA, weight: dist });
+                        if (!neighborsB.some(n => n.node.id === prevNode.id)) {
+                            neighborsB.push({ node: prevNode, weight: dist });
                         }
                     }
                 }
             }
         });
 
-        console.log(`PathFinder: Manual Graph built with ${this.nodes.length} nodes (Fused by ${SNAP_DISTANCE_METERS}m).`);
+        console.log(`PathFinder: Manual Graph built with ${this.nodes.length} nodes (Hybrid Snap: ${SNAP_ENDPOINT}m/${SNAP_INTERNAL}m).`);
     }
 
     // Override or Modify findPath to snap to nearest Manual Node
@@ -263,7 +286,7 @@ export class PathFinder {
         let loops = 0;
         while (openSet.length > 0) {
             loops++;
-            if (loops > 2000) { console.warn("A* Loop Limit Exceeded"); break; }
+            if (loops > 50000) { console.warn("A* Loop Limit Exceeded"); break; }
 
             // Get node with lowest fScore
             let currentId = openSet[0];

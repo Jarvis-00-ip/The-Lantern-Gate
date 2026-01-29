@@ -6,6 +6,11 @@ import { FleetManager } from '../core/FleetManager.js';
 import { DepotUI } from './DepotUI.js';
 import { PathFinder } from '../core/PathFinder.js';
 import { ROAD_NETWORK } from '../core/RoadNetworkData.js';
+import { VesselManager } from '../core/VesselManager.js';
+import { JobManager } from '../core/JobManager.js';
+import { TruckManager } from '../core/TruckManager.js';
+import { MainMenu } from './MainMenu.js';
+import { TOSDashboard } from './TOSDashboard.js';
 
 console.log("Initializing The Lantern Gate UI (Geospatial Mode)...");
 
@@ -14,13 +19,66 @@ if (typeof L === 'undefined') {
 }
 
 try {
+
+
     // --- 1. System Initialization ---
     const yard = new Yard();
     const geoManager = new GeoManager();
     const inspector = new FloatingInspector('yard-container');
+    const fleetManager = new FleetManager();
+    const vesselManager = new VesselManager();
+    const jobManager = new JobManager(fleetManager, yard);
+    const truckManager = new TruckManager(geoManager, jobManager, yard);
+
+    // Expose Global API
+    window.yard = yard;
+    window.fleet = fleetManager;
+    window.vesselManager = vesselManager;
+    window.jobManager = jobManager;
+    window.truckManager = truckManager;
+    window.geo = geoManager;
+
+    // ...
+
+    // Truck Markers Cache
+    const truckMarkers = {};
+
+    const renderTrucks = () => {
+        const trucks = truckManager.getTrucks();
+
+        trucks.forEach(t => {
+            let marker = truckMarkers[t.id];
+
+            // Simulation Logic: Move towards target
+            // Simple direct movement for MVP visualization if no path
+            // Real logic should use PathFinder, similar to Vehicles
+
+            // If just spawned, put at position
+            if (!marker) {
+                const iconHtml = `<div style="background-color: #f0f0f0; width: 14px; height: 14px; border-radius: 2px; border: 2px solid #333; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>`;
+                const icon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [18, 18], iconAnchor: [9, 9] });
+
+                marker = L.marker([t.position.lat, t.position.lng], { icon: icon }).addTo(vehicleLayer).bindPopup(`<b>${t.id}</b><br>${t.status}<br>${t.plate}`);
+                marker.truckId = t.id;
+                truckMarkers[t.id] = marker;
+            } else {
+                // Update position visual
+                // In a real loop we'd interpolate
+                marker.setLatLng([t.position.lat, t.position.lng]);
+                marker.setPopupContent(`<b>${t.id}</b><br>${t.status}<br>${t.plate}`);
+            }
+
+            // Movement Logic (Simplified for now - can use PathFinder later)
+            // For MVP, lets just have them "teleport" or "slide" in update loop if we had one.
+            // But TruckManager.update() is empty on movement logic currently.
+            // We should use PathFinder here if we want them to drive.
+        });
+    };
+
+    // Update Animation Loop to include trucks
+    // ...
 
     // New Vehicle Systems
-    const fleetManager = new FleetManager();
     // Initialize PathFinder when ready (needs zones, so usually after geomanager loads, but for now we assume sync)
     // Actually zones are static in GeoManager for MVP, so fine.
     const pathFinder = new PathFinder(geoManager);
@@ -184,23 +242,55 @@ try {
     // Render Function for Roads
     const renderRoads = () => {
         roadLayerGroup.clearLayers();
+
+        // Check Mode: Hide roads in Test Mode (unless user explicitly wants them, but assumed 'Realistic' view)
+        // User Request: "Show only in test mode" -> interpreted as "Show only in MAPPING mode" (Editing)
+        // because hiding them in Mapping Mode would break editing.
+        const isMapping = document.getElementById('mode-switch')?.checked;
+        if (!isMapping) return; // Hide visuals in Test/Simulation Mode
+
         manualRoads.forEach(road => {
-            const isOneWay = road.properties ? road.properties.oneWay : false;
-            const color = isOneWay ? '#FF4500' : '#FFD700'; // OrangeRed for OneWay, Gold for Normal
+            const props = road.properties || {};
+            const isOneWay = props.oneWay || false;
+            const type = props.type || 'unknown';
+
+            // Default Style (Standard Roads)
+            // Toned down colors: Tomato instead of OrangeRed
+            let color = isOneWay ? '#FF6347' : '#FFD700';
+            let weight = 4;
+            let dashArray = '10, 5';
+            let opacity = 0.6; // Slightly more transparent
+
+            // Type-Specific Styling
+            if (type.includes('rail') || type === 'train') {
+                color = '#444444'; // Dark Grey for Rails
+                weight = 3;
+                dashArray = '2, 2'; // Tight dash for tracks
+            } else if (type === 'footway' || type === 'pedestrian' || type === 'steps') {
+                color = '#00FF7F'; // SpringGreen for walkways
+                weight = 2;
+                dashArray = '5, 5';
+            } else if (type === 'service') {
+                color = '#CCCCCC'; // Light Grey for service roads
+                weight = 3;
+                dashArray = '5, 10'; // Sparse dash
+            }
 
             // Draw Line
             const polyline = L.polyline(road.path, {
                 color: color,
-                dashArray: '10, 5',
-                weight: 4,
-                opacity: 0.7
+                dashArray: dashArray,
+                weight: weight,
+                opacity: opacity
             }).addTo(roadLayerGroup);
 
             // Bind Data
+            const typeLabel = type !== 'unknown' ? `Type: ${type}` : '';
+            polyline.bindTooltip(`${typeLabel}${isOneWay ? ' (One-Way)' : ''}`);
             polyline.roadData = road;
 
             // Add Arrow if OneWay
-            if (isOneWay) {
+            if (isOneWay && !type.includes('rail') && !type.includes('foot')) {
                 const arrow = addArrow(polyline, color);
                 if (arrow) arrow.addTo(roadLayerGroup);
             }
@@ -208,8 +298,9 @@ try {
             // Click Interaction to Toggle
             if (map.pm && map.pm.globalEditModeEnabled()) {
                 polyline.on('click', (e) => {
-                    const confirmToggle = confirm(`Toggle One-Way?\nCurrent: ${isOneWay ? "YES" : "NO"}`);
+                    const confirmToggle = confirm(`Toggle One-Way?\nCurrent: ${isOneWay ? "YES" : "NO"}\nType: ${type}`);
                     if (confirmToggle) {
+                        if (!road.properties) road.properties = {};
                         road.properties.oneWay = !road.properties.oneWay;
                         renderRoads(); // Re-render logic
                         // Update PathFinder
@@ -294,6 +385,134 @@ try {
 
     const exportBtn = createExportButton();
 
+    // OSM Import Logic
+    const createImportButton = () => {
+        const btn = document.createElement('button');
+        btn.innerHTML = '⬇️ Import OSM';
+        btn.className = 'btn btn-secondary'; // Distinct style
+        btn.style.position = 'absolute';
+        btn.style.top = '10px';
+        btn.style.right = '340px'; // Left of Export
+        btn.style.zIndex = '1000';
+        btn.style.display = 'none'; // Hidden by default
+        btn.id = 'btn-import-osm';
+
+        btn.onclick = async () => {
+            if (map.getZoom() < 15) {
+                alert("Area too large! Please zoom in to at least level 15 to avoid overloading the server.");
+                return;
+            }
+
+            const confirmImport = confirm("⚠️ This will OVERWRITE your current manual roads with data from OpenStreetMap. Continue?");
+            if (!confirmImport) return;
+
+            btn.disabled = true;
+            btn.innerHTML = '⏳ Loading...';
+
+            try {
+                // Get bounds (or use fixed port area for safety)
+                const bounds = map.getBounds();
+                const s = bounds.getSouth();
+                const w = bounds.getWest();
+                const n = bounds.getNorth();
+                const e = bounds.getEast();
+
+                // Overpass Query: customizable filter (highway=service is common in terminals)
+                // Added timeout:180 to prevent 504 errors on large datasets
+                const query = `
+                    [out:json][timeout:180];
+                    (
+                      way["highway"](${s},${w},${n},${e});
+                      way["railway"](${s},${w},${n},${e});
+                    );
+                    out geom;
+                `;
+
+                console.log("Fetching OSM Data with query:", query);
+
+                const response = await fetch('https://overpass-api.de/api/interpreter', {
+                    method: 'POST',
+                    body: query
+                });
+
+                if (!response.ok) throw new Error(`OSM API Error: ${response.statusText}`);
+
+                const data = await response.json();
+                console.log("OSM Data Received:", data);
+
+                if (!data.elements || data.elements.length === 0) {
+                    alert("No roads found in this area on OSM.");
+                    return;
+                }
+
+                // Clear current
+                manualRoads.length = 0;
+
+                // Process Elements
+                let count = 0;
+                data.elements.forEach(el => {
+                    if (el.type === 'way' && el.geometry) {
+                        // 1. Convert Geometry
+                        let path = el.geometry.map(p => ({ lat: p.lat, lng: p.lon }));
+
+                        // 2. Parse Properties
+                        let isOneWay = false;
+                        if (el.tags) {
+                            if (el.tags.oneway === '-1') {
+                                isOneWay = true;
+                                path.reverse(); // Reverse geometry for correct flow
+                            } else if (el.tags.oneway === 'yes' || el.tags.oneway === 'true' || el.tags.oneway === '1') {
+                                isOneWay = true;
+                            } else if (el.tags.junction === 'roundabout' || el.tags.junction === 'circular') {
+                                isOneWay = true;
+                            }
+                        }
+
+                        const type = el.tags.highway || el.tags.railway || 'unknown';
+
+                        const excludedTypes = ['construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished'];
+                        if (excludedTypes.includes(type)) {
+                            return; // Skip this segment
+                        }
+
+                        manualRoads.push({
+                            path: path,
+                            properties: {
+                                oneWay: isOneWay,
+                                osmId: el.id,
+                                type: type
+                            }
+                        });
+                        count++;
+                    }
+                });
+
+                console.log(`Imported ${manualRoads.length} segments from OSM.`);
+
+                // Re-render
+                renderRoads();
+
+                // Update PathFinder
+                pathFinder.setManualMode(true);
+                pathFinder.updateGraphFromPolylines(manualRoads);
+
+                alert(`Successfully imported ${count} road segments from OpenStreetMap!`);
+
+            } catch (err) {
+                console.error("OSM Import Failed:", err);
+                alert(`Import Failed: ${err.message}`);
+            } finally {
+                btn.disabled = false;
+                btn.innerHTML = '⬇️ Import OSM';
+            }
+        };
+
+        document.body.appendChild(btn);
+        return btn;
+    };
+
+    const importBtn = createImportButton();
+
     // Mode Toggle Logic
     const modeSwitch = document.getElementById('mode-switch');
     const modeLabel = document.getElementById('mode-label');
@@ -305,7 +524,9 @@ try {
             modeLabel.style.color = isMapping ? "#ff7800" : "var(--text-secondary)";
 
             updateEditorMode(isMapping);
+            renderRoads(); // Refresh visibility based on mode
             exportBtn.style.display = isMapping ? 'block' : 'none';
+            importBtn.style.display = isMapping ? 'block' : 'none';
             console.log("Editor Mode:", isMapping);
 
             // Re-render to clear/restore layers if needed
@@ -393,6 +614,42 @@ try {
 
     // Vehicle Markers Cache: { vehicleId: Marker }
     const vehicleMarkers = {};
+
+    const getVehicleIcon = (type, hasContainer) => {
+        const color = type === 'Ralla' ? '#e3b341' : '#f78166';
+
+        let containerHtml = '';
+        if (hasContainer) {
+            // Draw a small 20ft container on top
+            containerHtml = `
+                <div style="
+                    position: absolute;
+                    top: -6px; left: -4px;
+                    width: 20px; height: 10px;
+                    background: linear-gradient(45deg, #1f6feb, #58a6ff);
+                    border: 1px solid #0d1117;
+                    border-radius: 2px;
+                    box-shadow: 1px 1px 2px rgba(0,0,0,0.5);
+                    z-index: 10;
+                "></div>
+            `;
+        }
+
+        const iconHtml = `
+            <div style="position: relative;">
+                <div style="
+                    background-color: ${color}; 
+                    width: 12px; height: 12px; 
+                    border-radius: 50%; 
+                    border: 2px solid white; 
+                    box-shadow: 0 0 4px rgba(0,0,0,0.5); 
+                    transition: all 0.3s ease;
+                "></div>
+                ${containerHtml}
+            </div>
+        `;
+        return L.divIcon({ className: 'vehicle-marker', html: iconHtml, iconSize: [16, 16], iconAnchor: [8, 8] });
+    };
 
     const renderVehicles = () => {
         const vehicles = fleetManager.getVehicles();
@@ -490,6 +747,14 @@ try {
                 const currentDest = marker.destinationLatLng;
                 const destChanged = currentDest && (currentDest.lat !== targetLatLng.lat || currentDest.lng !== targetLatLng.lng);
 
+                // Update Icon if Container State Changed
+                const hasContainer = !!v.carriedContainer;
+                if (marker.hasContainer !== hasContainer) {
+                    const newIcon = getVehicleIcon(v.type, hasContainer);
+                    marker.setIcon(newIcon);
+                    marker.hasContainer = hasContainer;
+                }
+
                 if (marker.isFollowingPath && !destChanged) return;
 
                 if (destChanged) {
@@ -497,7 +762,7 @@ try {
                     marker.destinationLatLng = targetLatLng;
                     marker.isFollowingPath = false;
                     executeMove(marker, oldLatLng, targetLatLng, v);
-                    marker.setPopupContent(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
+                    marker.setPopupContent(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}<br>${hasContainer ? '📦 Loaded' : 'Empty'}`);
                 }
                 else if (map.distance(oldLatLng, targetLatLng) > 10 && !marker.isFollowingPath) {
                     marker.setLatLng(targetLatLng);
@@ -505,15 +770,15 @@ try {
 
             } else {
                 // --- CREATE NEW MARKER ---
-                const color = v.type === 'Ralla' ? '#e3b341' : '#f78166';
-                const iconHtml = `<div style="background-color: ${color}; width: 12px; height: 12px; border-radius: 50%; border: 2px solid white; box-shadow: 0 0 4px rgba(0,0,0,0.5); transition: all 0.3s ease;"></div>`;
-                const icon = L.divIcon({ className: 'vehicle-marker', html: iconHtml, iconSize: [16, 16], iconAnchor: [8, 8] });
+                const hasContainer = !!v.carriedContainer;
+                const icon = getVehicleIcon(v.type, hasContainer);
 
                 const depotCenter = geoManager.getZoneCenter('DEPOT_RALLE');
                 let startPos = depotCenter ? L.latLng(depotCenter.lat, depotCenter.lng) : targetLatLng;
 
                 marker = L.marker(startPos, { icon: icon, draggable: true }).addTo(vehicleLayer).bindPopup(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
                 marker.vehicleId = v.id; // Attach ID for tracking
+                marker.hasContainer = hasContainer; // Track state
 
                 vehicleMarkers[v.id] = marker;
                 marker.destinationLatLng = targetLatLng;
@@ -631,8 +896,50 @@ try {
         requestAnimationFrame(animate);
     };
 
-    // Update DepotUI to trigger renderApp
-    const depotUI = new DepotUI('yard-container', fleetManager, geoManager, renderApp);
+    // --- 3. UI Initialization ---
+    // Create Sub-Panels
+    // Updated: Use 'yard-container' as parent, since 'ui-overlay' does not exist in HTML.
+    const depotUI = new DepotUI('yard-container', fleetManager, geoManager, () => renderVehicles());
+    const tosUI = new TOSDashboard(vesselManager, jobManager);
+
+    // Initialize Control Panel (Original)
+    // We use 'controls' as variable name to match existing code usage (handleZoneClick etc.)
+    // Callback matches signature: (bay, row) => inspector.updateInfo(...)
+    // We need to verify inspector update function. The old code used 'updateInfo' wrapper.
+    // Let's replicate 'updateInfo' logic or pass inline.
+
+    const updateInfo = (bay, row) => {
+        const zoneId = controls.currentZoneId; // 'controls' will be defined by the time this runs? 
+        // JS const hoisting issue? No, 'controls' is const. It must be defined before use.
+        // But this is a callback function definition. It executes LATER. So 'controls' will be defined.
+        if (zoneId) {
+            const containers = yard.getContainersInZone(zoneId);
+            inspector.showZone(zoneId, containers);
+        }
+    };
+
+    const mockRenderer = { selectStack: () => renderApp() };
+    const controls = new ControlPanel(yard, mockRenderer, renderApp, updateInfo); // Replaced mockRenderer with null (it handled checkStates mostly internally) or valid renderer?
+    // ControlPanel constructor: (yard, renderer, renderCallback, selectionInfoCallback)
+    // Old code: passed 'mockRenderer'. 'mockRenderer.selectStack' called 'renderApp'.
+    // New code: pass null? ControlPanel calls renderer.selectStack?
+    // Let's check ControlPanel.js... it calls renderer.selectStack?
+    // Line 65: this.setZone...
+    // Line 113: setTarget handles it.
+    // Use 'null' for renderer if it's not strictly needed for logic, or pass a dummy.
+    // ControlPanel lines 6, 292.
+    // It calls renderCallback (arg 3) -> renderApp.
+    // It calls selectionInfoCallback (arg 4) -> updateInfo.
+    // It DOES NOT seem to call renderer methods other than storing it? 
+    // Wait, old code had 'mockRenderer.selectStack'.
+    // Let's keep a dummy renderer.
+
+    // Create Main Burger Menu to Orchestrate Panels
+    const mainMenu = new MainMenu({
+        control: null, // Control Panel managed via DOM ID 'control-panel' inside MainMenu logic 
+        fleet: depotUI,
+        tos: tosUI
+    });
 
     // Global reference for highlighting
     let selectedLayer = null;
@@ -681,42 +988,10 @@ try {
         controls.setTarget(bay, row);
     };
 
-    // --- 4. Integration with Control Panel ---
+    // --- 4. Controls Integrated Above ---
 
-    // Mock Renderer to satisfy ControlPanel constructor
-    // (The Control Panel expects a renderer to call 'selectStack' etc.)
-    const mockRenderer = {
-        selectStack: (bay, row) => {
-            // In the future, we can add selection highlights to the map here
-            console.log(`Map Selection: ${bay}-${row}`);
-            renderApp(); // Re-render to show updates if needed
-        },
-        setOnStackClick: (callback) => {
-            // Not used, we handle clicks directly in Leaflet layer
-        },
-        updateSelectionPanel: () => { } // Deprecated, handled by inspector/controls
-    };
-
-    // Callback for Control Panel when it needs to refresh UI
-    const updateInfo = (bay, row) => {
-        // Determine current zone from controls
-        const zoneId = controls.currentZoneId;
-        if (!zoneId) return;
-
-        // Refresh Inspector with full zone data (since we are showing zone-level view mostly)
-        // Or if we implemented single stack view, we would fetch that.
-        // For now, let's refresh the whole zone inspector
-        const containers = yard.getContainersInZone(zoneId);
-        inspector.showZone(zoneId, containers);
-
-        // Future: Highlight the specific stack on the map?
-    };
-
-    // Init Control Panel
-    const controls = new ControlPanel(yard, mockRenderer, renderApp, updateInfo);
-    // Populate Dropdown
+    // Populate Dropdown using the instance created above
     controls.populateZones(geoManager.getZones());
-
 
     // --- 5. Mock Data & Startup ---
     function initMockData() {
@@ -766,6 +1041,25 @@ try {
     initMockData();
     renderApp();
     console.log("UI Ready - Leaflet Map Active.");
+
+    // --- 6. Global Simulation Loop ---
+    let lastTime = performance.now();
+    const gameLoop = (time) => {
+        const dt = (time - lastTime) / 1000; // Seconds
+        lastTime = time;
+
+        // Updates
+        if (truckManager) truckManager.update(dt);
+        if (jobManager) {
+            // Future: jobManager.update(dt);
+        }
+
+        // Renders
+        renderTrucks();
+
+        requestAnimationFrame(gameLoop);
+    };
+    requestAnimationFrame(gameLoop);
 
     // --- 7. Splash Screen Handling ---
     const splash = document.getElementById('splash-screen');

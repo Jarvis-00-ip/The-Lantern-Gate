@@ -40,6 +40,41 @@ Creare un'esperienza simulativa profonda che permetta di gestire un terminal con
 
 ## 📂 Struttura Cartelle
 - `/src/core`: Logica di business (No UI dependencies)
-- `/src/ui`: Interfaccia utente
+- `/src/ui`: Interfaccia utente (Leaflet Map, Control Panels)
 - `/assets`: Risorse grafiche
 - `/docs`: Documentazione tecnica e di design
+
+---
+
+## 📅 Aggiornamento Stato (29/01/2026)
+Il progetto è evoluto da semplice gestore testuale a **Simulatore Geospaziale Completo**.
+
+### 🔥 Nuove Implementazioni
+1.  **Maps & Navigation Engine**:
+    *   Integrazione **Leaflet.js** con mappa satellitare/OSM.
+    *   Importazione rete stradale reale (OpenStreetMap) filtrata per uso portuale.
+    *   **Pathfinding A***: I veicoli (Ralle/Truck) navigano autonomamente sulla rete stradale.
+
+2.  **TOS Core (Terminal Operating System)**:
+    *   `VesselManager`: Gestione schedule navi, ETA/ETD e Manifesti di carico/scarico.
+    *   `JobManager`: Il "cervello" che crea missioni (Job) e le assegna ai veicoli disponibili.
+    *   `TruckManager`: Gestione truck esterni, flusso Gate (OCR Pre-Gate -> Gate -> Piazzale).
+
+3.  **Interfaccia Utente (UI Revamp)**:
+    *   **Unified Menu**: Nuovo Burger Menu per accesso rapido a tutte le funzioni.
+    *   **TOS Dashboard**: Cruscotto per monitorare navi attive e code di lavoro.
+    *   **Fleet Manager**: Pannello controllo Ralle/Semoventi con visualizzazione stato in tempo reale.
+    *   **Visualizzazione**: I veicoli mostrano graficamente se sono "carichi" (box colorato).
+
+4.  **Logica Operativa**:
+    *   Simulation Loop globale.
+    *   Gestione stati complessi per i Camion (Inbound, OCR Scan, Gate Queue, Yard).
+
+### ✅ Roadmap Aggiornata
+- [x] **Fase 1: Yard Core** (Coordinate, Stacking)
+- [x] **Fase 2: Geospatial & UI** (Mappa, Veicoli, Navigation)
+- [~] **Fase 3: Ship Ops** (Inziata: VesselManager pronto, manca simulazione STS)
+- [~] **Fase 4: Gate & Truck** (Iniziata: Logica Gate e OCR implementata)
+
+---
+**Nota per lo sviluppatore**: Il codice è stabile. Avviare `index.html` (via Live Server) per vedere la simulazione. Usa il Menu Burger -> "Spawn Truck" per testare il flusso gate.

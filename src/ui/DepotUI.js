@@ -12,20 +12,47 @@ export class DepotUI {
     init() {
         this.element = document.createElement('div');
         this.element.className = 'floating-menu depot-panel'; // reusing floating style
-        this.element.style.width = '400px';
+        this.element.style.width = '420px';
         this.element.style.zIndex = '10000'; // Top priority
+        this.activeTab = 'Ralla'; // Default tab
 
         this.element.innerHTML = `
-            <div class="floating-header" style="background: #2f363d;">
-                <span>🚜 Depot Management</span>
-                <div style="display:flex; gap:5px; align-items:center;">
-                    <button id="btn-deploy-all" style="font-size:0.7rem; background:#238636; color:white; border:1px solid rgba(240,246,252,0.1); padding:2px 6px; border-radius:4px; cursor:pointer; margin-right:10px;">Deploy All</button>
+            <div class="floating-header" style="background: #2f363d; display:flex; flex-direction:column; gap:5px;">
+                <div style="display:flex; justify-content:space-between; width:100%;">
+                    <span>🚜 Depot Management</span>
                     <button class="close-btn" id="depot-close">×</button>
                 </div>
+                <div style="display:flex; gap:10px; margin-top:5px; border-bottom:1px solid rgba(255,255,255,0.1);">
+                    <div class="tab-btn active" data-tab="Ralla">Ralle (Tractors)</div>
+                    <div class="tab-btn" data-tab="Reach Stacker">Semoventi (RS)</div>
+                </div>
             </div>
-            <div class="floating-content" id="depot-body">
+            
+            <div class="floating-toolbar" style="padding:10px; border-bottom:1px solid #30363d; display:flex; justify-content:space-between; align-items:center;">
+                <span id="vehicle-count" style="font-size:0.8rem; color:#8b949e;"></span>
+                <button id="btn-deploy-all" style="font-size:0.75rem; background:#238636; color:white; border:1px solid rgba(240,246,252,0.1); padding:4px 8px; border-radius:4px; cursor:pointer;">
+                    Deploy Visible
+                </button>
+            </div>
+
+            <div class="floating-content" id="depot-body" style="height:400px; overflow-y:auto;">
                 <!-- Vehicle List -->
             </div>
+            <style>
+                .tab-btn {
+                    padding: 5px 10px;
+                    font-size: 0.8rem;
+                    cursor: pointer;
+                    color: #8b949e;
+                    border-bottom: 2px solid transparent;
+                }
+                .tab-btn.active {
+                    color: white;
+                    border-bottom: 2px solid #58a6ff;
+                    font-weight: bold;
+                }
+                .tab-btn:hover { color: #c9d1d9; }
+            </style>
         `;
 
         this.container.appendChild(this.element);
@@ -33,8 +60,18 @@ export class DepotUI {
         // Close Handler
         this.element.querySelector('#depot-close').addEventListener('click', () => this.hide());
 
-        // Deploy All Handler
+        // Deploy All Handler (Current Tab)
         this.element.querySelector('#btn-deploy-all').addEventListener('click', () => this.handleDeployAll());
+
+        // Tab Handlers
+        this.element.querySelectorAll('.tab-btn').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                this.element.querySelectorAll('.tab-btn').forEach(b => b.classList.remove('active'));
+                e.target.classList.add('active');
+                this.activeTab = e.target.dataset.tab;
+                this.renderList();
+            });
+        });
     }
 
     show() {
@@ -53,25 +90,26 @@ export class DepotUI {
 
     renderList() {
         const body = this.element.querySelector('#depot-body');
-        const vehicles = this.fleet.getVehicles();
+        const countSpan = this.element.querySelector('#vehicle-count');
 
-        // Filter: Only allow deployment to Operational Zones
-        // types: LOADING, QUAY, GATE
+        // Filter Vehicles by Tab
+        const allVehicles = this.fleet.getVehicles();
+        const vehicles = allVehicles.filter(v => v.type === this.activeTab);
+
+        countSpan.textContent = `Showing ${vehicles.length} units`;
+
+        // Filter: Only allow deployment to Operational Zones + Depot
         const allowedTypes = ['LOADING', 'QUAY', 'GATE'];
         const zones = this.geoManager.getZones()
             .filter(z => allowedTypes.includes(z.type) && z.type !== 'DEPOT')
             .map(z => z.id);
 
         let html = `
-            <div style="margin-bottom:10px; font-size:0.85rem; color:#8b949e;">
-                Manage active fleet and assignments.
-            </div>
             <div class="vehicle-list" style="display:flex; flex-direction:column; gap:8px;">
         `;
 
         vehicles.forEach(v => {
             const statusColor = v.status === 'Active' ? '#3fb950' : '#8b949e';
-            const location = v.status === 'Active' ? v.currentZone : 'Depot';
 
             // Generate Zone Options
             const zoneOptions = zones.map(z =>
@@ -121,6 +159,7 @@ export class DepotUI {
         // Bind Select Implementation for ETA
         const selects = body.querySelectorAll('.zone-selector');
         selects.forEach(sel => {
+
             sel.addEventListener('change', (e) => {
                 const id = e.target.dataset.id;
                 const target = e.target.value;
@@ -162,9 +201,8 @@ export class DepotUI {
     }
 
     handleDeployAll() {
-        console.log("Batch Deploy Initiated...");
+        console.log(`Batch Deploy Initiated for tab: ${this.activeTab}`);
         const selects = this.element.querySelectorAll('.zone-selector');
-        let updateCount = 0;
         let scheduledCount = 0;
 
         selects.forEach(sel => {
@@ -205,10 +243,7 @@ export class DepotUI {
         });
 
         if (scheduledCount > 0) {
-            console.log(`Batch Deploy: Scheduled ${scheduledCount} vehicles with delays.`);
-            // Note: We don't renderList immediately because status hasn't changed yet.
-            // But we might want to give visual feedback?
-            // For now, let the timeout triggers handle the updates.
+            console.log(`Batch Deploy: Scheduled ${scheduledCount} vehicles.`);
         } else {
             console.log("Batch Deploy: No changes detected.");
         }
