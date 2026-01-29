@@ -142,6 +142,32 @@ export class FleetManager {
         return false;
     }
 
+    findNearestVehicle(type, targetPos, geoManager) {
+        const candidates = this.vehicles.filter(v => v.type === type && v.status === VehicleStatus.IDLE);
+
+        let nearest = null;
+        let minTime = Infinity;
+
+        candidates.forEach(v => {
+            let startPos = v.position;
+            // Handle idle vehicles at zero coords
+            if (!startPos || (startPos.lat === 0 && startPos.lng === 0)) {
+                // If we don't know where they are, assume Depot Ralle
+                const depot = geoManager.getZoneCenter('DEPOT_RALLE');
+                if (depot) startPos = depot;
+                else return;
+            }
+
+            const dist = geoManager._distanceMeters(startPos, targetPos);
+            if (dist < minTime) {
+                minTime = dist;
+                nearest = v;
+            }
+        });
+
+        return nearest;
+    }
+
     recallVehicle(id) {
         const v = this.getVehicle(id);
         if (v) {

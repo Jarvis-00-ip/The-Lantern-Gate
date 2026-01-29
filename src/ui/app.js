@@ -49,11 +49,7 @@ try {
         trucks.forEach(t => {
             let marker = truckMarkers[t.id];
 
-            // Simulation Logic: Move towards target
-            // Simple direct movement for MVP visualization if no path
-            // Real logic should use PathFinder, similar to Vehicles
-
-            // If just spawned, put at position
+            // 1. Create Marker if new
             if (!marker) {
                 const iconHtml = `<div style="background-color: #f0f0f0; width: 14px; height: 14px; border-radius: 2px; border: 2px solid #333; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>`;
                 const icon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [18, 18], iconAnchor: [9, 9] });
@@ -62,16 +58,67 @@ try {
                 marker.truckId = t.id;
                 truckMarkers[t.id] = marker;
             } else {
-                // Update position visual
-                // In a real loop we'd interpolate
-                marker.setLatLng([t.position.lat, t.position.lng]);
-                marker.setPopupContent(`<b>${t.id}</b><br>${t.status}<br>${t.plate}`);
+                // Update Popup
+                marker.setPopupContent(`<b>${t.id}</b><br>${t.status}<br>${t.plate}<br>Dest: ${t.targetZone || 'None'}`);
             }
 
-            // Movement Logic (Simplified for now - can use PathFinder later)
-            // For MVP, lets just have them "teleport" or "slide" in update loop if we had one.
-            // But TruckManager.update() is empty on movement logic currently.
-            // We should use PathFinder here if we want them to drive.
+            // 2. Movement Logic
+            // If truck has a target zone and is not currently animating (isFollowingPath flag), try to move.
+            // But we must check if we are ALREADY at the target (handled by TruckManager, but we need to avoid endless pathfinding calls)
+            // t.targetZone changes when state changes.
+
+            if (t.targetZone && !marker.isFollowingPath) {
+
+                const currentPos = marker.getLatLng();
+                const targetCenter = geoManager.getZoneCenter(t.targetZone);
+
+                if (targetCenter) {
+                    const dist = map.distance(currentPos, [targetCenter.lat, targetCenter.lng]);
+
+                    // If we are far away (> 20m), initiate movement
+                    if (dist > 20) {
+                        console.log(`[TRUCK] ${t.id} moving to ${t.targetZone}...`);
+
+                        // Calculate Path
+                        const path = pathFinder.findPath({ lat: currentPos.lat, lng: currentPos.lng }, t.targetZone);
+
+                        if (path && path.length > 0) {
+                            console.log(`[TRUCK] Path found: ${path.length} nodes.`);
+                            marker.isFollowingPath = true;
+
+                            // Update logical position during animation
+                            // We'll hook into the animatePath's frame update or just update t.position at the end? 
+                            // Better: Update t.position continuously if possible, OR rely on the marker position for the loop update?
+                            // TruckManager uses t.position. We must update t.position.
+
+                            // We can't easily hook into 'animatePath' without changing it.
+                            // But 'animatePath' updates the MARKER.
+                            // We can read the marker position in the NEXT renderTrucks call and sync it to t.position!
+
+                            // Wait, renderTrucks is called every frame.
+                            // So if marker moves, we just update t.position = marker.getLatLng() here below.
+
+                            // Use a smooth speed (e.g. 15 m/s ~ 50 km/h for trucks on road)
+                            animatePath(marker, path, 15);
+
+                        } else {
+                            // Fallback: Direct movement (teleport-ish slide)
+                            // console.warn("[TRUCK] No path found. Using direct slide.");
+                            // For now, let's just let the old logic (if any) or 'animateMarker' handle direct
+                            marker.isFollowingPath = true;
+                            animateMarker(marker, currentPos, L.latLng(targetCenter), 5000, () => {
+                                marker.isFollowingPath = false;
+                            });
+                        }
+                    }
+                }
+            }
+
+            // 3. SYNC: Update Logical Position from Visual Position
+            // This is CRITICAL for TruckManager to detect arrival
+            const visuals = marker.getLatLng();
+            t.position.lat = visuals.lat;
+            t.position.lng = visuals.lng;
         });
     };
 
@@ -841,6 +888,19 @@ try {
                 const end = pathPoints[pathPoints.length - 1];
                 if (marker.vehicleId) {
                     fleetManager.updateVehiclePosition(marker.vehicleId, end.lat, end.lng);
+
+                    // JOB COMPLETION CHECK
+                    // If vehicle arrives at destination and has an active job, complete it?
+                    // "Handling Animation" placeholder
+                    const v = fleetManager.getVehicle(marker.vehicleId);
+                    if (v && v.status === 'Job Assigned' && v.currentJobId) {
+                        // Simulate operation time (e.g. 5s lift)
+                        setTimeout(() => {
+                            console.log(`[Vehicle] ${v.id} finished operation.`);
+                            jobManager.completeJob(v.currentJobId);
+                            // Vehicle status is reset by completeJob, but we might need UI refresh
+                        }, 5000);
+                    }
                 }
                 return;
             }

@@ -2,7 +2,9 @@ export const JobType = {
     DISCHARGE: 'DISCHARGE', // Ship -> Yard
     LOAD: 'LOAD',           // Yard -> Ship
     MOVE: 'MOVE',           // Yard -> Yard / Gate -> Yard
-    SHUFFLE: 'SHUFFLE'      // Digging move
+    SHUFFLE: 'SHUFFLE',      // Digging move
+    TRUCK_EXPORT: 'TRUCK_EXPORT', // Truck -> Yard
+    TRUCK_IMPORT: 'TRUCK_IMPORT'  // Yard -> Truck
 };
 
 export const JobStatus = {
@@ -48,21 +50,33 @@ export class JobManager {
         return this.jobs.filter(j => j.status === JobStatus.IN_PROGRESS || j.status === JobStatus.ASSIGNED);
     }
 
-    // Simplistic Dispatcher (Phase 1)
-    // In Phase 2 this will become smarter (proximity, vehicle capabilities)
-    assignJob(jobId, vehicleId) {
+    assignJobToNearestVehicle(jobId) {
         const job = this.jobs.find(j => j.id === jobId);
-        const vehicle = this.fleetManager.getVehicle(vehicleId);
+        if (!job || job.status !== JobStatus.PENDING) return false;
 
-        if (job && vehicle && job.status === JobStatus.PENDING && vehicle.status === 'Idle') {
+        // Determine required vehicle type
+        let requiredType = 'Reach Stacker';
+        // Logic could be more complex (e.g. Straddles for some zones)
+
+        // Find Target Position for finding nearest
+        const targetZone = job.sourceZone; // Vehicle must go to Source to pick up (or interact)
+        const targetPos = this.yardManager.geoManager.getZoneCenter(targetZone);
+
+        if (!targetPos) return false;
+
+        const vehicle = this.fleetManager.findNearestVehicle(requiredType, targetPos, this.yardManager.geoManager);
+
+        if (vehicle) {
             job.status = JobStatus.ASSIGNED;
-            job.assignedVehicleId = vehicleId;
+            job.assignedVehicleId = vehicle.id;
 
-            // Update Vehicle Status (Phase 1: Direct link)
-            vehicle.status = 'Job Assigned'; // Custom status
+            vehicle.status = 'Job Assigned';
             vehicle.currentJobId = jobId;
+            vehicle.currentZone = targetZone; // Send vehicle to zone (teleport/move logic in app.js handles this)
 
-            console.log(`[JobManager] Assigned ${jobId} to ${vehicleId}`);
+            // Note: In app.js renderVehicles, if status is 'Job Assigned', it should move to 'currentZone'.
+
+            console.log(`[JobManager] Assigned ${jobId} to ${vehicle.id} (Nearest)`);
             return true;
         }
         return false;
