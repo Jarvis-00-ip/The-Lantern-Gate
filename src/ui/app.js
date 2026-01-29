@@ -418,6 +418,7 @@ try {
                 let startPos = depotCenter ? L.latLng(depotCenter.lat, depotCenter.lng) : targetLatLng;
 
                 marker = L.marker(startPos, { icon: icon, draggable: true }).addTo(vehicleLayer).bindPopup(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
+                marker.vehicleId = v.id; // Attach ID for tracking
 
                 vehicleMarkers[v.id] = marker;
                 marker.destinationLatLng = targetLatLng;
