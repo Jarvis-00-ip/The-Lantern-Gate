@@ -417,10 +417,41 @@ try {
                 const depotCenter = geoManager.getZoneCenter('DEPOT_RALLE');
                 let startPos = depotCenter ? L.latLng(depotCenter.lat, depotCenter.lng) : targetLatLng;
 
-                marker = L.marker(startPos, { icon: icon }).addTo(vehicleLayer).bindPopup(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
+                marker = L.marker(startPos, { icon: icon, draggable: true }).addTo(vehicleLayer).bindPopup(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
 
                 vehicleMarkers[v.id] = marker;
                 marker.destinationLatLng = targetLatLng;
+
+                // Drag Interaction
+                marker.on('dragend', (e) => {
+                    const newPos = e.target.getLatLng();
+                    console.log(`[Vehicle] Dragged ${v.id} to`, newPos);
+
+                    // Identify Zone Drop
+                    const zones = geoManager.getZones();
+                    let droppedZone = null;
+
+                    for (const z of zones) {
+                        if (z.vertices && geoManager._isPointInPolygon({ lat: newPos.lat, lng: newPos.lng }, z.vertices)) {
+                            droppedZone = z.id;
+                            break;
+                        }
+                    }
+
+                    if (droppedZone) {
+                        console.log(`[Vehicle] Dropped in ${droppedZone}`);
+                        v.currentZone = droppedZone;
+                        v.status = 'Active'; // Assume active if moved manually
+                    }
+
+                    // Update Position in Manager
+                    fleetManager.updateVehiclePosition(v.id, newPos.lat, newPos.lng);
+
+                    // Refresh UI
+                    depotUI.renderList();
+                    marker.setPopupContent(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
+                    marker.openPopup();
+                });
 
                 if (map.distance(startPos, targetLatLng) > 1) {
                     executeMove(marker, startPos, targetLatLng, v);

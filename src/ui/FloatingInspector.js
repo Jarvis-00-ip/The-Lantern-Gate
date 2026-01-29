@@ -120,17 +120,22 @@ export class FloatingInspector {
             <div style="max-height: 300px; overflow-y: auto;">
                 <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding-bottom: 8px; border-bottom: 1px solid #30363d; font-weight: bold; color: #8b949e; font-size: 0.8rem;">
                     <span>ID</span>
-                    <span>Type</span>
-                    <span>Loc This</span>
+                    <span>Typ.</span>
+                    <span>Loc</span>
+                    <span>Digs</span>
                 </div>
         `;
 
         containers.forEach(c => {
+            // Color code penalty
+            const penColor = c.penalty > 0 ? (c.penalty > 2 ? '#da3633' : '#e3b341') : '#3fb950';
+
             html += `
-                <div style="display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 4px; padding: 4px 0; border-bottom: 1px solid #21262d; font-size: 0.85rem; align-items: center;">
+                <div style="display: grid; grid-template-columns: 1fr 0.5fr 1fr 0.5fr; gap: 4px; padding: 4px 0; border-bottom: 1px solid #21262d; font-size: 0.85rem; align-items: center;">
                     <span style="font-weight:bold; color: ${this._getColorForType(c.type)}">${c.id}</span>
-                    <span style="color: #8b949e;">${c.type}</span>
+                    <span style="color: #8b949e;">${c.type.substring(0, 3)}</span>
                     <span style="font-family: monospace; background: #21262d; padding: 2px 4px; border-radius: 4px; font-size: 0.75rem;">${c.bay}-${c.row}-${c.tier + 1}</span>
+                    <span style="font-weight:bold; color: ${penColor}; text-align:center;">${c.penalty}</span>
                 </div>
             `;
         });

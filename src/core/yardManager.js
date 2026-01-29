@@ -204,7 +204,8 @@ export class Yard {
                         ...container,
                         bay,
                         row,
-                        tier: index
+                        tier: index,
+                        penalty: (stack.length - 1) - index // Digging Penalty
                     });
                 });
             }
