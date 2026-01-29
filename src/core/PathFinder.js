@@ -13,8 +13,8 @@ export class PathFinder {
         if (!enabled) this.initRoadGraph(); // Revert to grid/node
     }
 
-    updateGraphFromPolylines(latLngsArray) {
-        // latLngsArray is Array of Arrays of {lat, lng} (Segments)
+    updateGraphFromPolylines(roadSegments) {
+        // roadSegments is Array of { path: [{lat,lng}...], properties: { oneWay: boolean } }
         console.log("PathFinder: Rebuilding graph from Manual Lines...");
         this.nodes = [];
         this.graph = new Map();
@@ -42,7 +42,10 @@ export class PathFinder {
 
         const MAX_SEGMENT_LEN = 15; // Meters
 
-        latLngsArray.forEach(segment => {
+        roadSegments.forEach(road => {
+            const segment = road.path;
+            const oneWay = road.properties ? road.properties.oneWay : false;
+
             for (let i = 0; i < segment.length - 1; i++) {
                 const start = segment[i];
                 const end = segment[i + 1];
@@ -65,12 +68,15 @@ export class PathFinder {
                         // Link prev -> current
                         const dist = this.geoManager._distanceMeters(prevNode, currentNode);
                         if (prevNode.id !== currentNode.id) {
-                            // Link
+                            // Link Forward
                             if (!this.graph.get(prevNode.id).some(n => n.node.id === currentNode.id)) {
                                 this.graph.get(prevNode.id).push({ node: currentNode, weight: dist });
                             }
-                            if (!this.graph.get(currentNode.id).some(n => n.node.id === prevNode.id)) {
-                                this.graph.get(currentNode.id).push({ node: prevNode, weight: dist });
+                            // Link Backward (Only if NOT one-way)
+                            if (!oneWay) {
+                                if (!this.graph.get(currentNode.id).some(n => n.node.id === prevNode.id)) {
+                                    this.graph.get(currentNode.id).push({ node: prevNode, weight: dist });
+                                }
                             }
                         }
                         prevNode = currentNode;
@@ -85,15 +91,18 @@ export class PathFinder {
 
                     const dist = this.geoManager._distanceMeters(nodeA, nodeB);
 
-                    // Add Bi-directional edge
+                    // Forward Edge (A -> B)
                     const neighborsA = this.graph.get(nodeA.id);
                     if (!neighborsA.some(n => n.node.id === nodeB.id)) {
                         neighborsA.push({ node: nodeB, weight: dist });
                     }
 
-                    const neighborsB = this.graph.get(nodeB.id);
-                    if (!neighborsB.some(n => n.node.id === nodeA.id)) {
-                        neighborsB.push({ node: nodeA, weight: dist });
+                    // Backward Edge (B -> A) - Only if NOT one-way
+                    if (!oneWay) {
+                        const neighborsB = this.graph.get(nodeB.id);
+                        if (!neighborsB.some(n => n.node.id === nodeA.id)) {
+                            neighborsB.push({ node: nodeA, weight: dist });
+                        }
                     }
                 }
             }

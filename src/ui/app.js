@@ -149,12 +149,79 @@ try {
     if (map.pm) map.pm.removeControls();
 
     // Store Manual Roads (Load from Persistence)
+    // Structure: { path: LatLngs[], properties: { oneWay: boolean } }
     const manualRoads = [...ROAD_NETWORK];
+    const roadLayerGroup = L.layerGroup().addTo(map);
 
-    // Render Persistent Roads
-    manualRoads.forEach(roadPath => {
-        L.polyline(roadPath, { color: '#FFD700', dashArray: '10, 5', weight: 4, opacity: 0.7 }).addTo(map);
-    });
+    // Helper: Add Arrow Decorator for One-Way
+    const addArrow = (polyline, color) => {
+        const latlngs = polyline.getLatLngs();
+        if (latlngs.length < 2) return;
+
+        // Get middle segment
+        const midIndex = Math.floor(latlngs.length / 2);
+        const p1 = latlngs[midIndex];
+        const p2 = latlngs[midIndex + 1] || latlngs[midIndex - 1]; // Fallback
+
+        if (!p1 || !p2) return;
+
+        // Calculate bearing
+        const dx = p2.lng - p1.lng;
+        const dy = p2.lat - p1.lat;
+        const angle = Math.atan2(dy, dx) * (180 / Math.PI);
+
+        // Create Arrow Icon
+        const arrowIcon = L.divIcon({
+            className: 'road-arrow',
+            html: `<div style="transform: rotate(${90 - angle}deg); font-size: 20px; color: ${color}; font-weight: bold; text-shadow: 0 0 2px black;">⬇</div>`,
+            iconSize: [20, 20],
+            iconAnchor: [10, 10]
+        });
+
+        return L.marker(p1, { icon: arrowIcon, interactive: false });
+    };
+
+    // Render Function for Roads
+    const renderRoads = () => {
+        roadLayerGroup.clearLayers();
+        manualRoads.forEach(road => {
+            const isOneWay = road.properties ? road.properties.oneWay : false;
+            const color = isOneWay ? '#FF4500' : '#FFD700'; // OrangeRed for OneWay, Gold for Normal
+
+            // Draw Line
+            const polyline = L.polyline(road.path, {
+                color: color,
+                dashArray: '10, 5',
+                weight: 4,
+                opacity: 0.7
+            }).addTo(roadLayerGroup);
+
+            // Bind Data
+            polyline.roadData = road;
+
+            // Add Arrow if OneWay
+            if (isOneWay) {
+                const arrow = addArrow(polyline, color);
+                if (arrow) arrow.addTo(roadLayerGroup);
+            }
+
+            // Click Interaction to Toggle
+            if (map.pm && map.pm.globalEditModeEnabled()) {
+                polyline.on('click', (e) => {
+                    const confirmToggle = confirm(`Toggle One-Way?\nCurrent: ${isOneWay ? "YES" : "NO"}`);
+                    if (confirmToggle) {
+                        road.properties.oneWay = !road.properties.oneWay;
+                        renderRoads(); // Re-render logic
+                        // Update PathFinder
+                        pathFinder.setManualMode(true);
+                        pathFinder.updateGraphFromPolylines(manualRoads);
+                    }
+                });
+            }
+        });
+    };
+
+    renderRoads();
 
     // Initialize PathFinder with Persistent Roads
     if (manualRoads.length > 0) {
@@ -169,20 +236,35 @@ try {
 
             if (e.shape === 'Line') {
                 const latlngs = e.layer.getLatLngs();
-                manualRoads.push(latlngs);
+
+                // New Road Object
+                const newRoad = {
+                    path: latlngs.map(p => ({ lat: p.lat, lng: p.lng })), // Clean LatLng
+                    properties: { oneWay: false }
+                };
+
+                manualRoads.push(newRoad);
                 console.log("Road Segment Added. Total:", manualRoads.length);
+
+                // Remove the raw edited layer and let our renderer handle it (to unify logic)
+                e.layer.remove();
+
+                renderRoads();
 
                 // Update PathFinder Live
                 pathFinder.setManualMode(true);
                 pathFinder.updateGraphFromPolylines(manualRoads);
 
-                // Visual Debug (New lines match persistent style)
-                e.layer.setStyle({ color: '#FFD700', dashArray: '10, 5', weight: 4 });
             } else {
                 logZoneCoordinates(e.layer);
             }
 
             e.layer.on('pm:edit', () => { if (e.shape !== 'Line') logZoneCoordinates(e.layer) });
+        });
+
+        // Re-bind clicks when mode changes
+        map.on('pm:globaleditmodetoggled', (e) => {
+            renderRoads(); // Refresh to attach/detach click listeners
         });
     }
 
@@ -209,6 +291,7 @@ try {
         document.body.appendChild(btn);
         return btn;
     };
+
     const exportBtn = createExportButton();
 
     // Mode Toggle Logic
@@ -483,6 +566,17 @@ try {
             if (!marker.isFollowingPath) return; // Abort if flag cleared
             if (currentStep >= pathPoints.length - 1) {
                 marker.isFollowingPath = false; // Done
+
+                // Cleanup Traces
+                if (marker.vehicleId && debugTraceLayers[marker.vehicleId]) {
+                    debugTraceLayers[marker.vehicleId].remove();
+                    delete debugTraceLayers[marker.vehicleId];
+                }
+                // Final Pos Update
+                const end = pathPoints[pathPoints.length - 1];
+                if (marker.vehicleId) {
+                    fleetManager.updateVehiclePosition(marker.vehicleId, end.lat, end.lng);
+                }
                 return;
             }
 
