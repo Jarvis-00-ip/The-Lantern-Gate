@@ -33,11 +33,23 @@ try {
         preferCanvas: true
     });
 
-    // Satellite Layer (Esri World Imagery)
-    L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+    // Base Layers
+    const satellite = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
         attribution: 'Tiles &copy; Esri',
         maxZoom: 19
-    }).addTo(map);
+    });
+
+    const osm = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+        attribution: '&copy; OpenStreetMap contributors',
+        maxZoom: 19
+    }).addTo(map); // Default to OSM
+
+    const baseMaps = {
+        "Map (OSM)": osm,
+        "Satellite (Esri)": satellite
+    };
+
+    L.control.layers(baseMaps).addTo(map);
 
     // DEBUG: Draw Road Graph
     const debugLayer = L.layerGroup(); // Optional: addTo(map) to see lines
@@ -630,7 +642,12 @@ try {
             const maxR = Math.min(5, capacity.rows);
 
             // Populate randomly
-            const fillRate = 0.3; // 30% full
+            let fillRate = 0.3; // 30% full
+
+            // Heavy Load in Crane/Loading areas
+            if (zone.id.includes('CRANE') || zone.id.includes('LOADING')) {
+                fillRate = 0.95;
+            }
 
             for (let b = 1; b <= maxB; b++) {
                 for (let r = 1; r <= maxR; r++) {
