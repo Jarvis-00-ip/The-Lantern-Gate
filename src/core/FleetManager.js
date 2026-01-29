@@ -16,6 +16,7 @@ export class Vehicle {
         this.type = type;
         this.status = VehicleStatus.IDLE;
         this.currentZone = 'DEPOT_RALLE'; // Default location
+        this.deployedZone = 'DEPOT_RALLE'; // Home base for return
         this.assignedBlock = null; // e.g., 'BLOCK_A'
         this.position = { x: 0, y: 0, rotation: 0 };
     }
@@ -83,6 +84,7 @@ export class FleetManager {
 
         v.status = VehicleStatus.ACTIVE;
         v.currentZone = targetZoneId;
+        v.deployedZone = targetZoneId; // Save as Home
         v.position = {
             lat: position.lat,
             lng: position.lng,
@@ -124,10 +126,10 @@ export class FleetManager {
         return Math.ceil(distMeters / speedMps);
     }
 
-    updateVehiclePosition(id, x, y, rotation = 0) {
+    updateVehiclePosition(id, lat, lng, rotation = 0) {
         const v = this.getVehicle(id);
         if (v) {
-            v.position = { x, y, rotation };
+            v.position = { lat, lng, rotation };
             return true;
         }
         return false;
@@ -143,7 +145,11 @@ export class FleetManager {
     }
 
     findNearestVehicle(type, targetPos, geoManager) {
-        const candidates = this.vehicles.filter(v => v.type === type && v.status === VehicleStatus.IDLE);
+        // Updated: Allow 'Active' vehicles if they don't have a job (Manually deployed vehicles)
+        const candidates = this.vehicles.filter(v =>
+            v.type === type &&
+            (v.status === VehicleStatus.IDLE || (v.status === VehicleStatus.ACTIVE && !v.currentJobId))
+        );
 
         let nearest = null;
         let minTime = Infinity;

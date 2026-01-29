@@ -27,7 +27,7 @@ try {
     const inspector = new FloatingInspector('yard-container');
     const fleetManager = new FleetManager();
     const vesselManager = new VesselManager();
-    const jobManager = new JobManager(fleetManager, yard);
+    const jobManager = new JobManager(fleetManager, yard, geoManager);
     const truckManager = new TruckManager(geoManager, jobManager, yard);
 
     // Expose Global API
@@ -40,87 +40,7 @@ try {
 
     // ...
 
-    // Truck Markers Cache
-    const truckMarkers = {};
-
-    const renderTrucks = () => {
-        const trucks = truckManager.getTrucks();
-
-        trucks.forEach(t => {
-            let marker = truckMarkers[t.id];
-
-            // 1. Create Marker if new
-            if (!marker) {
-                const iconHtml = `<div style="background-color: #f0f0f0; width: 14px; height: 14px; border-radius: 2px; border: 2px solid #333; box-shadow: 0 0 4px rgba(0,0,0,0.5);"></div>`;
-                const icon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [18, 18], iconAnchor: [9, 9] });
-
-                marker = L.marker([t.position.lat, t.position.lng], { icon: icon }).addTo(vehicleLayer).bindPopup(`<b>${t.id}</b><br>${t.status}<br>${t.plate}`);
-                marker.truckId = t.id;
-                truckMarkers[t.id] = marker;
-            } else {
-                // Update Popup
-                marker.setPopupContent(`<b>${t.id}</b><br>${t.status}<br>${t.plate}<br>Dest: ${t.targetZone || 'None'}`);
-            }
-
-            // 2. Movement Logic
-            // If truck has a target zone and is not currently animating (isFollowingPath flag), try to move.
-            // But we must check if we are ALREADY at the target (handled by TruckManager, but we need to avoid endless pathfinding calls)
-            // t.targetZone changes when state changes.
-
-            if (t.targetZone && !marker.isFollowingPath) {
-
-                const currentPos = marker.getLatLng();
-                const targetCenter = geoManager.getZoneCenter(t.targetZone);
-
-                if (targetCenter) {
-                    const dist = map.distance(currentPos, [targetCenter.lat, targetCenter.lng]);
-
-                    // If we are far away (> 20m), initiate movement
-                    if (dist > 20) {
-                        console.log(`[TRUCK] ${t.id} moving to ${t.targetZone}...`);
-
-                        // Calculate Path
-                        const path = pathFinder.findPath({ lat: currentPos.lat, lng: currentPos.lng }, t.targetZone);
-
-                        if (path && path.length > 0) {
-                            console.log(`[TRUCK] Path found: ${path.length} nodes.`);
-                            marker.isFollowingPath = true;
-
-                            // Update logical position during animation
-                            // We'll hook into the animatePath's frame update or just update t.position at the end? 
-                            // Better: Update t.position continuously if possible, OR rely on the marker position for the loop update?
-                            // TruckManager uses t.position. We must update t.position.
-
-                            // We can't easily hook into 'animatePath' without changing it.
-                            // But 'animatePath' updates the MARKER.
-                            // We can read the marker position in the NEXT renderTrucks call and sync it to t.position!
-
-                            // Wait, renderTrucks is called every frame.
-                            // So if marker moves, we just update t.position = marker.getLatLng() here below.
-
-                            // Use a smooth speed (e.g. 15 m/s ~ 50 km/h for trucks on road)
-                            animatePath(marker, path, 15);
-
-                        } else {
-                            // Fallback: Direct movement (teleport-ish slide)
-                            // console.warn("[TRUCK] No path found. Using direct slide.");
-                            // For now, let's just let the old logic (if any) or 'animateMarker' handle direct
-                            marker.isFollowingPath = true;
-                            animateMarker(marker, currentPos, L.latLng(targetCenter), 5000, () => {
-                                marker.isFollowingPath = false;
-                            });
-                        }
-                    }
-                }
-            }
-
-            // 3. SYNC: Update Logical Position from Visual Position
-            // This is CRITICAL for TruckManager to detect arrival
-            const visuals = marker.getLatLng();
-            t.position.lat = visuals.lat;
-            t.position.lng = visuals.lng;
-        });
-    };
+    // Truck Renderer moved to bottom to ensure dependencies (PathFinder) are initialized.
 
     // Update Animation Loop to include trucks
     // ...
@@ -770,7 +690,8 @@ try {
 
         vehicles.forEach(v => {
             // Check if vehicle is active and has position
-            if (v.status !== 'Active' || !v.position || !v.position.lat) {
+            // Fix: Allow custom statuses like 'Job Assigned', 'Operating' etc.
+            if (!v.position || !v.position.lat) {
                 if (vehicleMarkers[v.id]) {
                     vehicleMarkers[v.id].remove();
                     delete vehicleMarkers[v.id];
@@ -804,15 +725,37 @@ try {
 
                 if (marker.isFollowingPath && !destChanged) return;
 
+                // MOVEMENT LOGIC: Converge to Target Zone
+                // If we have a target zone, and we are not moving, check distance.
+                if (v.currentZone && !marker.isFollowingPath) {
+                    const targetZoneCenter = geoManager.getZoneCenter(v.currentZone);
+                    if (targetZoneCenter) {
+                        const currentPos = marker.getLatLng();
+                        const dist = map.distance(currentPos, [targetZoneCenter.lat, targetZoneCenter.lng]);
+
+                        // If we are far (>30m) from where we should be, MOVE.
+                        if (dist > 30) {
+                            console.log(`[Fleet] Vehicle ${v.id} is ${Math.round(dist)}m from ${v.currentZone}. Moving...`);
+                            marker.destinationLatLng = L.latLng(targetZoneCenter.lat, targetZoneCenter.lng);
+                            executeMove(marker, currentPos, marker.destinationLatLng, v);
+                        } else {
+                            // We are there.
+                            // Ensure sync? 
+                        }
+                    }
+                }
+
+                // Handling Teleport/Drag updates from logic not handled by pathfinder
                 if (destChanged) {
-                    console.log(`Vehicle ${v.id} redirected to ${v.currentZone}`);
-                    marker.destinationLatLng = targetLatLng;
-                    marker.isFollowingPath = false;
-                    executeMove(marker, oldLatLng, targetLatLng, v);
-                    marker.setPopupContent(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}<br>${hasContainer ? '📦 Loaded' : 'Empty'}`);
+                    // console.log(`Vehicle ${v.id} redirected to ${v.currentZone}`);
+                    // marker.destinationLatLng = targetLatLng;
+                    // marker.isFollowingPath = false;
+                    // executeMove(marker, oldLatLng, targetLatLng, v);
+                    // marker.setPopupContent(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}<br>${hasContainer ? '📦 Loaded' : 'Empty'}`);
                 }
                 else if (map.distance(oldLatLng, targetLatLng) > 10 && !marker.isFollowingPath) {
-                    marker.setLatLng(targetLatLng);
+                    // This handles manual position updates from simulation if any
+                    // marker.setLatLng(targetLatLng);
                 }
 
             } else {
@@ -823,9 +766,19 @@ try {
                 const depotCenter = geoManager.getZoneCenter('DEPOT_RALLE');
                 let startPos = depotCenter ? L.latLng(depotCenter.lat, depotCenter.lng) : targetLatLng;
 
-                marker = L.marker(startPos, { icon: icon, draggable: true }).addTo(vehicleLayer).bindPopup(`<b>${v.id}</b><br>${v.type}<br>${v.currentZone}`);
+                marker = L.marker(startPos, { icon: icon, draggable: true }).addTo(vehicleLayer);
                 marker.vehicleId = v.id; // Attach ID for tracking
                 marker.hasContainer = hasContainer; // Track state
+
+                // Add Click Handler for Inspector
+                marker.on('click', (e) => {
+                    let job = null;
+                    if (v.currentJobId) {
+                        job = jobManager.jobs.find(j => j.id === v.currentJobId);
+                    }
+                    inspector.showVehicle(v, job);
+                    L.DomEvent.stopPropagation(e);
+                });
 
                 vehicleMarkers[v.id] = marker;
                 marker.destinationLatLng = targetLatLng;
@@ -1050,6 +1003,85 @@ try {
 
     // --- 4. Controls Integrated Above ---
 
+    // TRUCK RENDERER
+    const truckMarkers = {}; // Cache
+    const renderTrucks = () => {
+        if (!truckManager) return;
+        const trucks = truckManager.getTrucks();
+
+        trucks.forEach(t => {
+            if (t.status === 'Departed') {
+                if (truckMarkers[t.id]) {
+                    truckMarkers[t.id].remove();
+                    delete truckMarkers[t.id];
+                }
+                return;
+            }
+
+            let marker = truckMarkers[t.id];
+
+            // Create if missing
+            if (!marker) {
+                const iconHtml = `<div style="background: #4caf50; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>`;
+                const icon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [16, 16] });
+                marker = L.marker([t.position.lat, t.position.lng], { icon: icon }).addTo(map);
+                marker.bindPopup(`<b>${t.id}</b><br>${t.plate}<br>${t.status}`);
+                marker.truckId = t.id;
+                truckMarkers[t.id] = marker;
+            }
+
+            // Determine Status Label
+            let statusLabel = '🟢 Moving';
+            if (t.isPaused) statusLabel = '🛑 Queued (Too Close)';
+            else if (['OCR Scan', 'Gate Check', 'Servicing'].includes(t.status)) statusLabel = '⏳ Processing';
+
+            // Update Popup
+            marker.setPopupContent(`<b>${t.plate}</b><br>${t.status}<br>${statusLabel}`);
+
+            // PAUSE LOGIC: If paused, stop movement
+            if (t.isPaused) {
+                // Ensure marker matches data (snap)
+                // marker.setLatLng([t.position.lat, t.position.lng]); 
+                // Don't snap continuously if animating, but if paused, we hold pos.
+                return;
+            }
+
+            // MOVEMENT LOGIC
+            // We need to move the truck towards its target zone center.
+            if (t.targetZone && !marker.isFollowingPath) {
+                const targetCenter = geoManager.getZoneCenter(t.targetZone);
+                if (targetCenter) {
+                    const currentLatLng = marker.getLatLng();
+                    const dist = map.distance(currentLatLng, [targetCenter.lat, targetCenter.lng]);
+
+                    if (dist > 4) {
+                        // Find Path
+                        const start = { lat: currentLatLng.lat, lng: currentLatLng.lng };
+                        const path = pathFinder.findPath(start, t.targetZone);
+
+                        if (path && path.length > 0) {
+                            const fullPath = [start, ...path, { lat: targetCenter.lat, lng: targetCenter.lng }];
+                            marker.isFollowingPath = true;
+                            // Use generic animatePath helper
+                            animatePath(marker, fullPath, 13.8); // 50 km/h
+                        } else {
+                            // Fallback Linear
+                            marker.isFollowingPath = true;
+                            animateMarker(marker, currentLatLng, L.latLng(targetCenter.lat, targetCenter.lng), (dist / 10) * 1000, () => {
+                                marker.isFollowingPath = false;
+                            });
+                        }
+                    }
+                }
+            }
+
+            // Sync Data Position with Marker
+            const pos = marker.getLatLng();
+            t.position.lat = pos.lat;
+            t.position.lng = pos.lng;
+        });
+    };
+
     // Populate Dropdown using the instance created above
     controls.populateZones(geoManager.getZones());
 
@@ -1110,12 +1142,11 @@ try {
 
         // Updates
         if (truckManager) truckManager.update(dt);
-        if (jobManager) {
-            // Future: jobManager.update(dt);
-        }
+        if (jobManager) jobManager.update(dt);
 
         // Renders
         renderTrucks();
+        renderVehicles(); // Ensure internal fleet moves automatically
 
         requestAnimationFrame(gameLoop);
     };

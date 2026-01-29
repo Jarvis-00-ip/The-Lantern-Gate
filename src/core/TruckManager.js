@@ -19,6 +19,7 @@ export class Truck {
         this.position = { lat: 0, lng: 0 };
         this.targetZone = 'OCR_GATE'; // First stop
         this.assignedJobId = null;
+        this.targetContainerId = null; // For Imports, what are we fetching?
     }
 }
 
@@ -29,24 +30,77 @@ export class TruckManager {
         this.yardManager = yardManager;
         this.trucks = [];
 
+        // Export Queues (Containers waiting for Pickup)
+        // In a real system, these would come from Booking api.
+        this.exportQueues = {
+            TRUCK: [], // List of Container IDs available for pickup by trucks
+            TRAIN: [],
+            VESSEL: []
+        };
+
         // Settings
-        this.gateProcessingTimeMs = 10000; // 10 seconds
-        this.ocrProcessingTimeMs = 2000;   // 2 seconds fast scan
+        this.gateProcessingTimeMs = 2000; // 2 seconds (was 5s)
+        this.ocrProcessingTimeMs = 1000;   // 1 second (was 2s)
     }
 
-    spawnTruck(missionType = 'DROP_EXPORT') {
+    /**
+     * Attempts to spawn a truck.
+     * Logic:
+     * - Randomly decide if DROP (Export) or PICK (Import).
+     * - If PICK, check if there are containers in exportQueues.TRUCK.
+     * - If Queue empty, force DROP.
+     */
+    spawnTruck() {
+        // 0. Safety Check: Is Entry Clear?
+        const entryPoint = { lat: 44.407500, lng: 8.907500 };
+        const blocked = this.trucks.some(t => {
+            const dist = this.geoManager._distanceMeters(t.position, entryPoint);
+            return dist < 40; // Maintain 40m clear at entry
+        });
+
+        if (blocked) {
+            console.log("[TruckManager] Entry blocked. Delaying spawn.");
+            return null;
+        }
+
+        // 1. Decide Mission
+        let missionType = 'DROP_EXPORT';
+        let containerId = null;
+        let targetContainerId = null;
+
+        // 40% chance of PICK if there is cargo
+        if (this.exportQueues.TRUCK.length > 0 && Math.random() < 0.4) {
+            missionType = 'PICK_IMPORT';
+            // Pop from queue
+            targetContainerId = this.exportQueues.TRUCK.shift();
+            console.log(`[TruckManager] Spawning Truck to PICK UP ${targetContainerId}`);
+        } else {
+            missionType = 'DROP_EXPORT';
+            containerId = `CN${Math.floor(Math.random() * 100000)}`;
+        }
+
         const id = `TRK-${Math.floor(Math.random() * 9000) + 1000}`;
         const plate = `AB${Math.floor(Math.random() * 900) + 100}CD`;
-        const containerId = missionType === 'DROP_EXPORT' ? `CN${Math.floor(Math.random() * 100000)}` : null;
 
         const truck = new Truck(id, plate, containerId, missionType);
+        if (missionType === 'PICK_IMPORT') {
+            truck.targetContainerId = targetContainerId;
+        }
 
-        // Spawn Location: "Via della Superba" entry point (approximate)
-        // This coordinates should align with the start of the manual road network in app.js
-        truck.position = { lat: 44.407500, lng: 8.907500 };
+        // Spawn Location: "Via della Superba"
+        // LANE RANDOMIZATION: Add slight offset to lat/lng to simulate lanes
+        // Base: 44.407500, 8.907500
+        // Offset: +/- 0.000020 deg (~2m)
+        const laneOffsetLat = (Math.random() * 0.000050) - 0.000025;
+        const laneOffsetLng = (Math.random() * 0.000050) - 0.000025;
+
+        truck.position = {
+            lat: 44.407500 + laneOffsetLat,
+            lng: 8.907500 + laneOffsetLng
+        };
 
         this.trucks.push(truck);
-        console.log(`[TruckManager] Truck ${id} (${plate}) spawned at ENTRY. Heading to OCR.`);
+        console.log(`[TruckManager] Truck ${id} (${plate}) spawned. Mission: ${missionType}.`);
 
         return truck;
     }
@@ -56,10 +110,57 @@ export class TruckManager {
         this.trucks.forEach(t => {
             if (t.status === TruckStatus.DEPARTED) return;
 
+            // --- COLLISION AVOIDANCE (Basic Queueing) ---
+            // Check if any *other* truck is ahead and close
+            let tooClose = false;
+            // Simple check: Find any truck within 15m
+            for (const other of this.trucks) {
+                if (other.id !== t.id && other.status !== TruckStatus.DEPARTED) {
+                    const dist = this.geoManager._distanceMeters(t.position, other.position);
+                    if (dist < 12) {
+                        // Rough logic: Determine who is "ahead".
+                        // For Inbound: Closer to GATE_IN is ahead.
+                        // For Exit: Closer to GATE_OUT is ahead.
+                        // Simplest: If they are this close, just PAUSE. 
+                        // But we need to avoid deadlock. The one "behind" should pause.
+                        // We assume Inbound flow is North->South (lat decreases). 
+                        // Or we check distance to Target Zone.
+
+                        let myDistToTarget = Infinity;
+                        let otherDistToTarget = Infinity;
+
+                        // Shared Target?
+                        if (t.targetZone) {
+                            const zoneCenter = this.geoManager.getZoneCenter(t.targetZone);
+                            if (zoneCenter) {
+                                myDistToTarget = this.geoManager._distanceMeters(t.position, zoneCenter);
+                                otherDistToTarget = this.geoManager._distanceMeters(other.position, zoneCenter);
+                            }
+                        }
+
+                        // If I am further from target than him, I pause.
+                        if (myDistToTarget > otherDistToTarget) {
+                            tooClose = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            t.isPaused = tooClose; // Flag for Render/Movement logic (needs to be respected by App.js)
+            if (tooClose) {
+                // If paused, we don't process arrival triggers generally, 
+                // BUT we usually don't move the position here anyway (App.js pathfinder does).
+                // However, State Transitions (Arrivals) logic below depends on position.
+                // If App.js sees 'isPaused', it shouldn't move. 
+                // So position stays same, so loop logic below is safe (won't trigger arrival instantly).
+                return;
+            }
+
             // 1. INBOUND -> OCR
             if (t.status === TruckStatus.INBOUND) {
                 const dist = this.geoManager._distanceMeters(t.position, this.geoManager.getZoneCenter('OCR_GATE'));
-                if (dist < 10) {
+                if (dist < 25) { // Widened to ensure trigger
                     this.handleOCRArrival(t);
                 }
             }
@@ -67,7 +168,7 @@ export class TruckManager {
             // 2. GATE_QUEUE -> GATE_IN
             if (t.status === TruckStatus.GATE_QUEUE) {
                 const dist = this.geoManager._distanceMeters(t.position, this.geoManager.getZoneCenter('GATE_IN'));
-                if (dist < 10) {
+                if (dist < 25) { // Widened
                     this.handleGateArrival(t);
                 }
             }
@@ -77,7 +178,7 @@ export class TruckManager {
                 const target = this.geoManager.getZoneCenter(t.targetZone);
                 if (target) {
                     const dist = this.geoManager._distanceMeters(t.position, target);
-                    if (dist < 10) {
+                    if (dist < 25) { // Widened
                         this.handleYardArrival(t);
                     }
                 }
@@ -87,11 +188,29 @@ export class TruckManager {
             if (t.status === TruckStatus.SERVICING) {
                 if (t.assignedJobId) {
                     const job = this.jobManager.jobs.find(j => j.id === t.assignedJobId);
+
+                    // IF JOB COMPLETED
                     if (job && job.status === 'COMPLETED') {
                         console.log(`[Yard] Service Finished for ${t.plate}. Proceeding to EXIT.`);
 
-                        // FLIP LOGIC: If dropping export, now empty. If picking import, now has container.
-                        if (t.missionType === 'DROP_EXPORT') t.containerId = null;
+                        // LOGIC UPDATE: Handle Payload Changes
+                        if (t.missionType === 'DROP_EXPORT') {
+                            // Container Dropped
+                            // Add to IMPORT QUEUE (Simulating it becomes an import for someone else later? 
+                            // Or simpler: We just add *some* logic to fill queues.
+                            // Let's say: 50% chance this container stays for a Ship, 
+                            // 50% chance it is for a Truck Import (e.g. transshipment or return).
+                            // For Demo: Add to Truck Queue to sustain loop.
+                            if (t.containerId) {
+                                this.exportQueues.TRUCK.push(t.containerId);
+                                console.log(`[Logic] Container ${t.containerId} added to TRUCK IMPORT QUEUE.`);
+                            }
+                            t.containerId = null;
+                        } else if (t.missionType === 'PICK_IMPORT') {
+                            // Container Picked Up
+                            t.containerId = t.targetContainerId;
+                            t.targetContainerId = null;
+                        }
 
                         t.status = TruckStatus.EXITING;
                         t.targetZone = 'GATE_OUT';
@@ -102,7 +221,7 @@ export class TruckManager {
             // 5. EXITING -> GATE_OUT
             if (t.status === TruckStatus.EXITING) {
                 const dist = this.geoManager._distanceMeters(t.position, this.geoManager.getZoneCenter('GATE_OUT'));
-                if (dist < 10) {
+                if (dist < 25) { // Widened
                     this.handleGateExit(t);
                 }
             }
@@ -112,75 +231,91 @@ export class TruckManager {
     handleYardArrival(truck) {
         if (truck.status === TruckStatus.SERVICING) return;
 
-        truck.status = TruckStatus.SERVICING;
         console.log(`[Yard] Truck ${truck.plate} arrived at ${truck.targetZone}. Waiting for Service...`);
+        truck.status = TruckStatus.SERVICING;
 
-        // Trigger Job Creation?
-        // Actually Job was created at Gate, or we create it here?
-        // Best practice: Job Created at Gate, but Fleet Assignment might happen now or earlier.
-        // Let's create/assign here to ensure proximity check works based on truck position?
-        // Or re-trigger.
-
-        // We created it at Gate. Check handleGateArrival.
-        // If we didn't assign yet, do it now. Or force re-assign.
+        // Note: Job was created at Gate.
+        // We ensure the system knows we are ready.
+        // In a real system, we might update the job status to 'TRUCK_READY'.
     }
 
     handleOCRArrival(truck) {
         if (truck.status === TruckStatus.OCR_PROCESS) return;
         truck.status = TruckStatus.OCR_PROCESS;
-        console.log(`[OCR] Scanning ${truck.plate}... Container: ${truck.containerId || 'None'}`);
+        console.log(`[OCR] Scanning ${truck.plate}...`);
 
         setTimeout(() => {
-            truck.status = TruckStatus.GATE_QUEUE;
-            truck.targetZone = 'GATE_IN';
-            console.log(`[OCR] Scan Complete. Proceed to Main Gate.`);
+            try {
+                truck.status = TruckStatus.GATE_QUEUE;
+                truck.targetZone = 'GATE_IN';
+                console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to Gate Queue.`);
+            } catch (e) { console.error("OCR Timeout Error", e); }
         }, this.ocrProcessingTimeMs);
     }
 
     handleGateArrival(truck) {
         if (truck.status === TruckStatus.GATE_CHECK) return;
         truck.status = TruckStatus.GATE_CHECK;
-        console.log(`[Gate] Checking paperwork for ${truck.plate} (5s wait)...`);
+        console.log(`[Gate] Checking paperwork for ${truck.plate} (${truck.missionType})...`);
 
         setTimeout(() => {
-            // Assign Mission & Create Job
-            let jobType = 'TRUCK_EXPORT'; // Default
-            let targetZone = 'WAITING_CAMION';
+            try {
+                // Assign Mission & Create Job
+                let jobType = 'TRUCK_EXPORT'; // Default: Truck drops export
+                let targetZone = 'WAITING_CAMION';
 
-            if (truck.missionType === 'DROP_EXPORT') {
-                targetZone = 'WAITING_CAMION';
-                jobType = 'TRUCK_EXPORT';
+                if (truck.missionType === 'DROP_EXPORT') {
+                    targetZone = 'WAITING_CAMION'; // Place to drop
+                    jobType = 'TRUCK_EXPORT';
+                } else {
+                    // Picking up Import
+                    targetZone = 'WAITING_CAMION'; // Place to pick up (simplification)
+                    // ideally we guide truck to the specific stack? 
+                    // For MVP, trucks go to Transfer Zone 'WAITING_CAMION' and Straddle brings container there.
+                    jobType = 'TRUCK_IMPORT';
+                }
+
+                truck.targetZone = targetZone;
+
+                // Create Job
+                // For DROP: Source = Truck, Target = Yard
+                // For PICK: Source = Yard, Target = Truck
+                // BUT: JobManager creates job.
+
+                // Note on Job Creation: 
+                // If PICK, we need to know WHERE the container is?
+                // The YardManager should support finding it. 
+                // For now, we just say 'YARD' as source/target abstraction.
+
+                const containerId = truck.missionType === 'DROP_EXPORT' ? truck.containerId : truck.targetContainerId;
+
+                const job = this.jobManager.createJob(jobType, containerId, targetZone, 'YARD');
+                truck.assignedJobId = job.id;
+
+                // Try to assign immediately
+                this.jobManager.assignJobToNearestVehicle(job.id);
+
+                truck.status = TruckStatus.TO_YARD;
+                console.log(`[Gate] Access Granted. Proceed to ${truck.targetZone}. Job ${job.id} created.`);
+            } catch (err) {
+                console.error("[TruckManager] Gate Processing Error:", err);
+                // Fallback to release truck so it doesn't get stuck
+                truck.status = TruckStatus.TO_YARD;
+                truck.targetZone = 'WAITING_CAMION';
             }
-            // else if import...
-
-            truck.targetZone = targetZone;
-
-            // Create Job
-            const job = this.jobManager.createJob(jobType, truck.containerId, targetZone, 'YARD');
-            truck.assignedJobId = job.id;
-
-            // Try to assign immediately
-            this.jobManager.assignJobToNearestVehicle(job.id);
-
-            truck.status = TruckStatus.TO_YARD;
-            console.log(`[Gate] Access Granted. Proceed to ${truck.targetZone}. Job ${job.id} created.`);
-
-        }, 5000); // 5s wait
+        }, this.gateProcessingTimeMs);
     }
 
     handleGateExit(truck) {
         if (truck.isExitingGate) return; // Debounce
         truck.isExitingGate = true;
 
-        console.log(`[Gate OUT] Checking ${truck.plate} out (3s wait)...`);
+        console.log(`[Gate OUT] Checking ${truck.plate} out...`);
 
         setTimeout(() => {
             truck.status = TruckStatus.DEPARTED;
             truck.targetZone = null;
-            console.log(`[Gate OUT] Truck ${truck.plate} DEPARTED towards Genova Ovest.`);
-
-            // Remove from list or keep as history? 
-            // For MVP keep but mark departed.
+            console.log(`[Gate OUT] Truck ${truck.plate} DEPARTED.`);
         }, 3000);
     }
 

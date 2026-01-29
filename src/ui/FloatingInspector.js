@@ -160,6 +160,129 @@ export class FloatingInspector {
         this.onClose = callback;
     }
 
+    showTruck(truck) {
+        this.isVisible = true;
+        this.element.style.display = 'flex';
+        this.element.style.zIndex = "9999";
+
+        // Update Title
+        const title = this.element.querySelector('#floating-title');
+        title.textContent = `Vehicle Inspector`;
+
+        const body = this.element.querySelector('#floating-body');
+
+        // Status Color
+        const statusColor = truck.status === 'Servicing' ? '#e3b341' : '#3fb950';
+
+        let content = `
+            <div style="padding: 10px;">
+                <div style="font-size: 1.1rem; font-weight: bold; margin-bottom: 5px; color: white;">
+                    ${truck.id} <span style="font-size: 0.8rem; color: #8b949e;">(${truck.plate})</span>
+                </div>
+                
+                <div style="margin-bottom: 10px; border-bottom: 1px solid #30363d; padding-bottom: 10px;">
+                     <div style="display: flex; justify-content: space-between; margin-bottom: 4px;">
+                        <span style="color: #8b949e;">Status:</span>
+                        <span style="color: ${statusColor}; font-weight: bold;">${truck.status}</span>
+                    </div>
+                    <div style="display: flex; justify-content: space-between;">
+                        <span style="color: #8b949e;">Mission:</span>
+                        <span style="color: white;">${truck.missionType}</span>
+                    </div>
+                </div>
+
+                <div style="font-size: 0.9rem;">
+        `;
+
+        if (truck.missionType === 'DROP_EXPORT') {
+            if (truck.containerId) {
+                content += `
+                    <div style="color: #8b949e;">Carrying Export:</div>
+                    <div style="font-family: monospace; background: #21262d; padding: 4px; border-radius: 4px; margin-top: 4px; border: 1px solid #30363d;">
+                        ${truck.containerId}
+                    </div>
+                 `;
+            } else {
+                content += `<div style="color: #8b949e; font-style: italic;">Empty (Delivered)</div>`;
+            }
+        } else {
+            // IMPORT
+            if (truck.containerId) {
+                content += `
+                    <div style="color: #8b949e;">Carrying Import:</div>
+                    <div style="font-family: monospace; background: #21262d; padding: 4px; border-radius: 4px; margin-top: 4px; border: 1px solid #30363d;">
+                        ${truck.containerId}
+                    </div>
+                 `;
+            } else {
+                content += `
+                    <div style="color: #8b949e;">Waiting for:</div>
+                    <div style="font-family: monospace; background: #21262d; padding: 4px; border-radius: 4px; margin-top: 4px; border: 1px dashed #8b949e; color: #e3b341;">
+                        ${truck.targetContainerId || 'Assignment...'}
+                    </div>
+                 `;
+            }
+        }
+
+        content += `</div></div>`;
+        body.innerHTML = content;
+    }
+
+    showVehicle(vehicle, job) {
+        this.isVisible = true;
+        this.element.style.display = 'flex';
+        this.element.style.zIndex = "9999";
+
+        // Update Title
+        const title = this.element.querySelector('#floating-title');
+        title.textContent = `Fleet Inspector`;
+
+        const body = this.element.querySelector('#floating-body');
+
+        let content = `
+            <div style="padding: 10px;">
+                <div style="font-size: 1.1rem; font-weight: bold; margin-bottom: 5px; color: white;">
+                    ${vehicle.id} <span style="font-size: 0.8rem; color: #8b949e;">(${vehicle.type})</span>
+                </div>
+                
+                 <div style="margin-bottom: 8px;">
+                    <span style="background: ${vehicle.status === 'Idle' ? '#30363d' : '#e3b341'}; 
+                                 color: ${vehicle.status === 'Idle' ? '#8b949e' : 'black'}; 
+                                 padding: 2px 6px; border-radius: 4px; font-weight: bold; font-size: 0.8rem;">
+                        ${vehicle.status}
+                    </span>
+                </div>
+        `;
+
+        if (job) {
+            content += `
+                <div style="border-top: 1px solid #30363d; padding-top: 8px; margin-top: 8px;">
+                     <div style="color: white; font-weight: bold; font-size: 0.9rem; margin-bottom: 4px;">Current Job: ${job.type}</div>
+                     <div style="color: #8b949e; font-size: 0.8rem;">ID: ${job.id}</div>
+                     
+                     <div style="display: grid; grid-template-columns: 1fr 20px 1fr; margin-top: 8px; align-items: center; text-align: center;">
+                        <div style="background: #21262d; padding: 4px; border-radius: 4px; color: #8b949e; font-size: 0.8rem;">
+                            ${job.sourceZone}
+                        </div>
+                        <div style="color: #8b949e;">➜</div>
+                        <div style="background: #21262d; padding: 4px; border-radius: 4px; color: white; border: 1px solid #30363d; font-size: 0.8rem;">
+                            ${job.targetZone}
+                        </div>
+                     </div>
+
+                     <div style="margin-top: 8px;">
+                        <span style="color: #8b949e; font-size: 0.8rem;">Container:</span> <span style="font-family: monospace;">${job.containerId || 'N/A'}</span>
+                     </div>
+                </div>
+             `;
+        } else {
+            content += `<div style="color: #8b949e; font-style: italic; margin-top: 10px;">No Active Jobs</div>`;
+        }
+
+        content += `</div>`;
+        body.innerHTML = content;
+    }
+
     _getColorForType(type) {
         switch (type) {
             case 'Reefer': return '#58a6ff'; // Use a visible blue for text
