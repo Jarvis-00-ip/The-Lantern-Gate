@@ -176,6 +176,26 @@ export class GeoManager {
                 ]
             },
             {
+                id: 'DOGANA_IN', type: 'GATE', description: 'Dogana Ingresso',
+                // Placed between Highway Spawn and OCR
+                vertices: [
+                    { "lat": 44.40950, "lng": 8.90550 },
+                    { "lat": 44.40980, "lng": 8.90550 },
+                    { "lat": 44.40980, "lng": 8.90600 },
+                    { "lat": 44.40950, "lng": 8.90600 }
+                ]
+            },
+            {
+                id: 'DOGANA_OUT', type: 'GATE', description: 'Dogana Uscita',
+                // Placed after Gate Out, before Highway Despawn
+                vertices: [
+                    { "lat": 44.40850, "lng": 8.90400 },
+                    { "lat": 44.40880, "lng": 8.90400 },
+                    { "lat": 44.40880, "lng": 8.90450 },
+                    { "lat": 44.40850, "lng": 8.90450 }
+                ]
+            },
+            {
                 id: 'SPAWN_POINT_1', type: 'GATE', description: 'Casello Genova Ovest',
                 vertices: [
                     { "lat": 44.417907, "lng": 8.902442 },

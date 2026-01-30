@@ -1,11 +1,13 @@
 export const TruckStatus = {
     INBOUND: 'Inbound',
+    CUSTOMS_IN: 'Customs In',
     OCR_PROCESS: 'OCR Scan',
     GATE_QUEUE: 'Gate Queue',
     GATE_CHECK: 'Gate Check',
     TO_YARD: 'To Yard',
     SERVICING: 'Servicing', // Loading/Unloading
     EXITING: 'Exiting',    // To Gate Out
+    CUSTOMS_OUT: 'Customs Out',
     DEPARTING: 'Departing', // To Highway Despawn
     DEPARTED: 'Departed'
 };
@@ -44,24 +46,20 @@ export class TruckManager {
         this.ocrProcessingTimeMs = 1000;
     }
 
-    spawnTruck() {
-        // 0. Safety Check: Is Entry Clear?
-        // Use SPAWN_POINT_1
+    spawnTruck(requestedType = null) {
+        // 0. Safety Check
         const spawnZone = this.geoManager.getZoneCenter('SPAWN_POINT_1');
-        if (!spawnZone) {
-            console.error("SPAWN_POINT_1 not found!");
-            return null;
-        }
+        if (!spawnZone) return null;
 
         const entryPoint = spawnZone;
         const blocked = this.trucks.some(t => {
-            if (t.status === TruckStatus.DEPARTED) return false;
+            if (t.status === 'Departed') return false;
             const dist = this.geoManager._distanceMeters(t.position, entryPoint);
-            return dist < 40; // Maintain 40m clear at entry
+            return dist < 30; // Reduced to 30m to allow faster spawns
         });
 
         if (blocked) {
-            console.log("[TruckManager] Entry blocked. Delaying spawn.");
+            console.log("[TruckManager] Entry blocked.");
             return null;
         }
 
@@ -70,25 +68,39 @@ export class TruckManager {
         let containerId = null;
         let targetContainerId = null;
 
-        // 40% chance of PICK if there is cargo
-        if (this.exportQueues.TRUCK.length > 0 && Math.random() < 0.4) {
+        // Determine Type
+        let isImport = false;
+        if (requestedType) {
+            isImport = (requestedType === 'IMPORT');
+        } else {
+            // Random chance if not specified
+            isImport = (Math.random() < 0.4);
+        }
+
+        if (isImport) {
             missionType = 'PICK_IMPORT';
-            targetContainerId = this.exportQueues.TRUCK.shift();
-            console.log(`[TruckManager] Spawning Truck to PICK UP ${targetContainerId}`);
+            // Try to find a real container to pick
+            if (this.exportQueues.TRUCK.length > 0) {
+                targetContainerId = this.exportQueues.TRUCK.shift();
+            } else {
+                // Mock one for simulation visualization
+                targetContainerId = `MOCK-IMP-${Math.floor(Math.random() * 9000)}`;
+            }
         } else {
             missionType = 'DROP_EXPORT';
             containerId = `CN${Math.floor(Math.random() * 100000)}`;
         }
 
         const id = `TRK-${Math.floor(Math.random() * 9000) + 1000}`;
-        const plate = `AB${Math.floor(Math.random() * 900) + 100}CD`;
+        const plate = `GEN-${Math.floor(Math.random() * 900) + 100}`;
 
         const truck = new Truck(id, plate, containerId, missionType);
+        truck.targetZone = 'DOGANA_IN'; // NEW FLOW: First stop is Customs
         if (missionType === 'PICK_IMPORT') {
             truck.targetContainerId = targetContainerId;
         }
 
-        // Spawn Location: SPAWN_POINT_1 with slight offset
+        // Spawn Location with Jitter
         const laneOffsetLat = (Math.random() * 0.000050) - 0.000025;
         const laneOffsetLng = (Math.random() * 0.000050) - 0.000025;
 
@@ -99,7 +111,6 @@ export class TruckManager {
 
         this.trucks.push(truck);
         console.log(`[TruckManager] Truck ${id} (${plate}) spawned at Genova Ovest. Mission: ${missionType}.`);
-
         return truck;
     }
 
@@ -150,14 +161,30 @@ export class TruckManager {
             t.isPaused = tooClose;
             if (tooClose) return;
 
-            // 1. INBOUND -> OCR
+            // 1. INBOUND -> DOGANA_IN
             if (t.status === TruckStatus.INBOUND) {
-                const center = this.geoManager.getZoneCenter('OCR_GATE');
-                if (center) {
-                    const dist = this.geoManager._distanceMeters(t.position, center);
-                    if (dist < 20) this.handleOCRArrival(t);
+                const center = this.geoManager.getZoneCenter('DOGANA_IN');
+                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                    this.handleCustomsArrival(t, 'IN');
                 }
             }
+
+            // 1b. CUSTOMS_IN -> OCR
+            if (t.status === TruckStatus.CUSTOMS_IN) {
+                // Wait for processing to switch to OCR target (handled in handleCustomsArrival timeout)
+            }
+
+            // 2. TO OCR (Transition state, status might still be CUSTOMS_IN but target is OCR)
+            // Actually, let's use a specific status or just check target.
+            // Simplified: If target is OCR_GATE, check arrival.
+            if (t.targetZone === 'OCR_GATE' && t.status !== TruckStatus.OCR_PROCESS) {
+                const center = this.geoManager.getZoneCenter('OCR_GATE');
+                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                    this.handleOCRArrival(t);
+                }
+            }
+
+            // ... (Gate/Yard logic remains similar, just ensure status flow)
 
             // 2. GATE_QUEUE -> GATE_IN
             if (t.status === TruckStatus.GATE_QUEUE) {
@@ -168,7 +195,7 @@ export class TruckManager {
                 }
             }
 
-            // 3. TO_YARD -> Destination
+            // 3. TO_YARD
             if (t.status === TruckStatus.TO_YARD && t.targetZone) {
                 const target = this.geoManager.getZoneCenter(t.targetZone);
                 if (target) {
@@ -177,26 +204,18 @@ export class TruckManager {
                 }
             }
 
-            // 4. SERVICING -> WAIT FOR JOB COMPLETION
+            // 4. SERVICING
             if (t.status === TruckStatus.SERVICING) {
                 if (t.assignedJobId) {
                     const job = this.jobManager.jobs.find(j => j.id === t.assignedJobId);
-
-                    // IF JOB COMPLETED
                     if (job && job.status === 'COMPLETED') {
                         console.log(`[Yard] Service Finished for ${t.plate}. Proceeding to EXIT.`);
 
-                        // LOGIC UPDATE: Handle Payload Changes
                         if (t.missionType === 'DROP_EXPORT') {
-                            // Container Dropped
-                            if (t.containerId) {
-                                this.exportQueues.TRUCK.push(t.containerId);
-                                console.log(`[Logic] Container ${t.containerId} added to TRUCK IMPORT QUEUE.`);
-                            }
-                            t.containerId = null; // Visually remove
+                            if (t.containerId) this.exportQueues.TRUCK.push(t.containerId);
+                            t.containerId = null;
                         } else if (t.missionType === 'PICK_IMPORT') {
-                            // Container Picked Up
-                            t.containerId = t.targetContainerId; // Visually add
+                            t.containerId = t.targetContainerId;
                             t.targetContainerId = null;
                         }
 
@@ -209,13 +228,21 @@ export class TruckManager {
             // 5. EXITING -> GATE_OUT
             if (t.status === TruckStatus.EXITING) {
                 const center = this.geoManager.getZoneCenter('GATE_OUT');
-                if (center) {
-                    const dist = this.geoManager._distanceMeters(t.position, center);
-                    if (dist < 20) this.handleGateExit(t);
+                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                    this.handleGateExit(t);
                 }
             }
 
-            // 6. DEPARTING -> DESPAWN
+            // 6. GATE_OUT -> DOGANA_OUT
+            if (t.status === TruckStatus.CUSTOMS_OUT) {
+                // Moving to Dogana Out
+                const center = this.geoManager.getZoneCenter('DOGANA_OUT');
+                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                    this.handleCustomsArrival(t, 'OUT');
+                }
+            }
+
+            // 7. DEPARTING -> DESPAWN
             if (t.status === TruckStatus.DEPARTING) {
                 const center = this.geoManager.getZoneCenter('DESPAWN_POINT_1');
                 if (center) {
@@ -229,9 +256,34 @@ export class TruckManager {
         });
     }
 
+    handleCustomsArrival(truck, type) {
+        if (truck.isProcessingCustoms) return;
+        truck.isProcessingCustoms = true;
+
+        if (type === 'IN') {
+            truck.status = TruckStatus.CUSTOMS_IN;
+            console.log(`[Customs IN] Inspecting ${truck.plate}...`);
+            setTimeout(() => {
+                truck.isProcessingCustoms = false;
+                truck.status = TruckStatus.INBOUND; // Reset to allow movement logic to pick up next target?
+                // Actually, let's just set target.
+                truck.targetZone = 'OCR_GATE';
+                console.log(`[Customs IN] Cleared. Proceed to OCR.`);
+            }, 2000);
+        } else {
+            // OUT
+            console.log(`[Customs OUT] Final Check ${truck.plate}...`);
+            setTimeout(() => {
+                truck.isProcessingCustoms = false;
+                truck.status = TruckStatus.DEPARTING;
+                truck.targetZone = 'DESPAWN_POINT_1';
+                console.log(`[Customs OUT] Cleared. Proceed to Highway.`);
+            }, 2000);
+        }
+    }
+
     handleYardArrival(truck) {
         if (truck.status === TruckStatus.SERVICING) return;
-
         console.log(`[Yard] Truck ${truck.plate} arrived at ${truck.targetZone}. Waiting for Service...`);
         truck.status = TruckStatus.SERVICING;
     }
@@ -244,14 +296,14 @@ export class TruckManager {
         setTimeout(() => {
             truck.status = TruckStatus.GATE_QUEUE;
             truck.targetZone = 'GATE_IN';
-            console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to Gate Queue.`);
+            console.log(`[OCR] Scan Complete for ${truck.plate}.Proceeding to Gate Queue.`);
         }, this.ocrProcessingTimeMs);
     }
 
     handleGateArrival(truck) {
         if (truck.status === TruckStatus.GATE_CHECK) return;
         truck.status = TruckStatus.GATE_CHECK;
-        console.log(`[Gate] Checking paperwork for ${truck.plate} (${truck.missionType})...`);
+        console.log(`[Gate] Checking paperwork for ${truck.plate}...`);
 
         setTimeout(() => {
             let jobType = 'TRUCK_EXPORT';
@@ -261,7 +313,7 @@ export class TruckManager {
                 targetZone = 'WAITING_CAMION';
                 jobType = 'TRUCK_EXPORT';
             } else {
-                targetZone = 'WAITING_CAMION';
+                targetZone = 'WAITING_CAMION'; // Or specific stack if we had logic
                 jobType = 'TRUCK_IMPORT';
             }
 
@@ -273,21 +325,21 @@ export class TruckManager {
             this.jobManager.assignJobToNearestVehicle(job.id);
 
             truck.status = TruckStatus.TO_YARD;
-            console.log(`[Gate] Access Granted. Proceed to ${truck.targetZone}. Job ${job.id} created.`);
+            console.log(`[Gate] Access Granted.Proceed to ${truck.targetZone}.`);
         }, this.gateProcessingTimeMs);
     }
 
     handleGateExit(truck) {
-        if (truck.isExitingGate) return; // Debounce
+        if (truck.isExitingGate) return;
         truck.isExitingGate = true;
 
         console.log(`[Gate OUT] Checking ${truck.plate} out...`);
 
         setTimeout(() => {
-            truck.isExitingGate = false; // Reset flag so it doesn't get stuck if logic loops
-            truck.status = TruckStatus.DEPARTING; // New status
-            truck.targetZone = 'DESPAWN_POINT_1'; // New target
-            console.log(`[Gate OUT] Truck ${truck.plate} Cleared. Navigate to Highway.`);
+            truck.isExitingGate = false;
+            truck.status = TruckStatus.CUSTOMS_OUT; // Next stop: Dogana Out
+            truck.targetZone = 'DOGANA_OUT';
+            console.log(`[Gate OUT] Cleared. Proceed to Dogana Out.`);
         }, 3000);
     }
 

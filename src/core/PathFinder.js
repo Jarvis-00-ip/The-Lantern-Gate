@@ -1,3 +1,5 @@
+import { ROAD_NETWORK } from './RoadNetworkData.js';
+
 export class PathFinder {
     constructor(geoManager) {
         this.geoManager = geoManager;
@@ -76,11 +78,14 @@ export class PathFinder {
         const SNAP_INTERNAL = 1;  // Strict shape preservation
 
         const MAX_SEGMENT_LEN = 5;
-        const excludedTypes = ['construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished'];
+        const excludedTypes = ['construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished',
+            'rail', 'subway', 'tram', 'railway', 'construction', 'train'];
 
         roadSegments.forEach(road => {
             const type = road.properties ? road.properties.type : 'unknown';
             if (excludedTypes.includes(type)) return;
+            // Additional check for OSM tags if properties.type is generic
+            if (road.properties && (road.properties.railway || road.properties.train)) return;
 
             const segment = road.path;
             const oneWay = road.properties ? road.properties.oneWay : false;
@@ -202,77 +207,42 @@ export class PathFinder {
     }
 
     initRoadGraph() {
-        const zones = this.geoManager.getZones();
-        const navigableTypes = ['ROAD', 'GATE', 'LOADING', 'QUAY', 'DEPOT'];
+        console.log("PathFinder: Building Graph from ROAD_NETWORK...");
 
-        const nodes = [];
-        let nodeIdCounter = 0;
-
-        // Grid Settings
-        const GRID_STEP = 0.0003; // degrees (~20-30 meters)
-
-        zones.forEach(z => {
-            if (navigableTypes.includes(z.type) || z.type === 'DEPOT_RALLE') {
-
-                // Get Bounding Box of Zone
-                const vertices = this.geoManager.getZonePolygon(z.id);
-                if (!vertices || vertices.length < 3) return;
-
-                let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
-                vertices.forEach(v => {
-                    if (v.lat < minLat) minLat = v.lat;
-                    if (v.lat > maxLat) maxLat = v.lat;
-                    if (v.lng < minLng) minLng = v.lng;
-                    if (v.lng > maxLng) maxLng = v.lng;
-                });
-
-                // Scan Grid
-                for (let lat = minLat; lat <= maxLat; lat += GRID_STEP) {
-                    for (let lng = minLng; lng <= maxLng; lng += GRID_STEP) {
-                        const point = { lat, lng };
-                        if (this.geoManager._isPointInPolygon(point, vertices)) {
-                            nodes.push({
-                                id: `n_${nodeIdCounter++}`,
-                                lat: point.lat,
-                                lng: point.lng,
-                                originZone: z.id,
-                                type: z.type
-                            });
-                        }
-                    }
-                }
+        // INJECT HIGHWAY CONNECTION: Genova Ovest (Spawn) <-> Port Road Network
+        // Updated to pass through DOGANA areas
+        const highway = [
+            // Main Spine from Casello to Port Area
+            {
+                path: [
+                    { lat: 44.41776, lng: 8.902517 }, // Spawn/Despawn (Genova Ovest)
+                    { lat: 44.41400, lng: 8.903000 }, // Intermediate
+                    { lat: 44.41100, lng: 8.904000 }, // Approach Dogana
+                ],
+                properties: { type: 'motorway', oneway: false }
+            },
+            // Branch to DOGANA IN (Ingresso)
+            {
+                path: [
+                    { lat: 44.41100, lng: 8.904000 },
+                    { lat: 44.40965, lng: 8.905500 }, // DOGANA IN
+                    { lat: 44.40660, lng: 8.907800 }  // Connect to OCR/Gate Area
+                ],
+                properties: { type: 'primary', oneway: false }
+            },
+            // Branch from DOGANA OUT (Uscita)
+            {
+                path: [
+                    { lat: 44.40714, lng: 8.904790 }, // GATE OUT
+                    { lat: 44.40865, lng: 8.904250 }, // DOGANA OUT
+                    { lat: 44.41100, lng: 8.904000 }  // Merge back to Highway
+                ],
+                properties: { type: 'primary', oneway: false }
             }
-        });
+        ];
 
-        this.nodes = nodes;
-
-        // 2. Build Edges (Connect Grid Neighbors)
-        // Since it's a grid, we look for neighbors within slightly more than GRID_STEP
-        // We use a spatial hash or simple distance check (optimized)
-        // For MVP, simple N^2 on filtered set is too slow if N is large.
-        // Optimization: Sort by Lat? Or just brute force if N < 500. 
-        // Let's assume N is manageable (~200 nodes). If huge, we need optimization.
-
-        const MAX_CONN_DIST = 80; // meters (Increased to ensure diagonals and zone jumps connect)
-
-        nodes.forEach(nodeA => {
-            nodes.forEach(nodeB => {
-                if (nodeA.id === nodeB.id) return;
-
-                // Quick Lat/Lng check before heavy distance calc (0.001 deg ~ 80-110m)
-                if (Math.abs(nodeA.lat - nodeB.lat) > 0.001) return;
-                if (Math.abs(nodeA.lng - nodeB.lng) > 0.001) return;
-
-                const dist = this.geoManager._distanceMeters(nodeA, nodeB);
-
-                if (dist < MAX_CONN_DIST) {
-                    if (!this.graph.has(nodeA.id)) this.graph.set(nodeA.id, []);
-                    this.graph.get(nodeA.id).push({ node: nodeB, weight: dist });
-                }
-            });
-        });
-
-        console.log(`PathFinder: GRID Graph built with ${nodes.length} nodes.`);
+        const allRoads = [...ROAD_NETWORK, ...highway];
+        this.updateGraphFromPolylines(allRoads);
     }
 
 

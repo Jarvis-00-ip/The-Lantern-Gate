@@ -492,15 +492,28 @@ try {
         btn.id = 'btn-bulk-spawn';
 
         btn.onclick = () => {
-            const countStr = prompt("How many trucks to spawn?", "5");
+            const countStr = prompt("How many trucks? (e.g. 5)", "5");
+            const typeStr = prompt("Type? (I = Import, E = Export)", "I");
+
             const count = parseInt(countStr);
             if (!isNaN(count) && count > 0) {
                 let spawned = 0;
                 const interval = setInterval(() => {
-                    const t = truckManager.spawnTruck();
-                    if (t) spawned++;
+                    // Map generic I/E to specific missions if needed, or update TruckManager to accept "IMPORT"/"EXPORT"
+                    // Assuming TruckManager.spawnTruck() can handle a hint or we rely on random for now 
+                    // until we update TruckManager signature.
+                    // Actually, let's pass the type to spawnTruck if we can update it.
+                    // For now, let's assume default random or I'll update TruckManager next.
+
+                    // Simple Hack: We will update TruckManager to accept 'IMPORT' or 'EXPORT'
+                    const missionType = (typeStr && typeStr.toUpperCase().startsWith('E')) ? 'EXPORT' : 'IMPORT';
+
+                    const t = truckManager.spawnTruck(missionType);
+                    console.log(`Spawned Bulk Truck ${t.id} (${missionType})`);
+
+                    spawned++;
                     if (spawned >= count) clearInterval(interval);
-                }, 1500); // 1.5s delay between spawns
+                }, 1500);
             }
         };
         document.body.appendChild(btn);
@@ -1081,11 +1094,12 @@ try {
                             const fullPath = [start, ...path, { lat: targetCenter.lat, lng: targetCenter.lng }];
                             marker.isFollowingPath = true;
                             // Use generic animatePath helper
-                            animatePath(marker, fullPath, 13.8); // 50 km/h
+                            // SPEED UPDATE: 70 km/h ~= 19.44 m/s
+                            animatePath(marker, fullPath, 19.44);
                         } else {
                             // Fallback Linear
                             marker.isFollowingPath = true;
-                            animateMarker(marker, currentLatLng, L.latLng(targetCenter.lat, targetCenter.lng), (dist / 10) * 1000, () => {
+                            animateMarker(marker, currentLatLng, L.latLng(targetCenter.lat, targetCenter.lng), (dist / 19.44) * 1000, () => {
                                 marker.isFollowingPath = false;
                             });
                         }
