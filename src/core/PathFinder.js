@@ -45,7 +45,7 @@ export class PathFinder {
             const centerX = Math.floor(lng / GRID_SIZE);
 
             let bestCandidate = null;
-            let minD = snapRadius;
+            let minD = 40; // Increased from snapRadius to 40m default to be more forgiving
 
             // Check 3x3 grid around the point
             for (let dy = -1; dy <= 1; dy++) {
