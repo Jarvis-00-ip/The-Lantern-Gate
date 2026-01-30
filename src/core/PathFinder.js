@@ -14,124 +14,146 @@ export class PathFinder {
     }
 
     updateGraphFromPolylines(roadSegments) {
-        // roadSegments is Array of { path: [{lat,lng}...], properties: { oneWay: boolean } }
         console.log("PathFinder: Rebuilding graph from Manual Lines...");
         this.nodes = [];
         this.graph = new Map();
 
         let nodeIdCounter = 0;
-        // Optimization: Use a simple list for brute-force distance check (N is small < 1000)
 
-        const SNAP_ENDPOINT = 12; // Connect loose ends (endpoints only)
-        const SNAP_INTERNAL = 1;  // Strict shape preservation (1m precision)
+        // OPTIMIZATION: Spatial Grid for O(1) Lookup
+        // 0.00015 deg is approx 12-16 meters.
+        const GRID_SIZE = 0.00015;
+        const spatialGrid = new Map(); // "latIdx_lngIdx" -> [nodes]
+
+        const getGridKey = (lat, lng) => {
+            const y = Math.floor(lat / GRID_SIZE);
+            const x = Math.floor(lng / GRID_SIZE);
+            return `${y}_${x}`;
+        };
+
+        const addToGrid = (node) => {
+            const key = getGridKey(node.lat, node.lng);
+            if (!spatialGrid.has(key)) spatialGrid.set(key, []);
+            spatialGrid.get(key).push(node);
+        };
 
         const getOrCreateNode = (lat, lng, snapRadius) => {
-            // 1. Check if an existing node is very close
-            const candidate = { lat, lng };
-            for (const node of this.nodes) {
-                if (this.geoManager._distanceMeters(node, candidate) < snapRadius) {
-                    return node;
+            // 1. Check Spatial Grid (Current + 9 Neighbors)
+            const centerY = Math.floor(lat / GRID_SIZE);
+            const centerX = Math.floor(lng / GRID_SIZE);
+
+            let bestCandidate = null;
+            let minD = snapRadius;
+
+            // Check 3x3 grid around the point
+            for (let dy = -1; dy <= 1; dy++) {
+                for (let dx = -1; dx <= 1; dx++) {
+                    const key = `${centerY + dy}_${centerX + dx}`;
+                    const bucket = spatialGrid.get(key);
+                    if (bucket) {
+                        for (const node of bucket) {
+                            const d = this.geoManager._distanceMeters(node, { lat, lng });
+                            if (d < minD) {
+                                minD = d;
+                                bestCandidate = node;
+                            }
+                        }
+                    }
                 }
             }
+
+            if (bestCandidate) return bestCandidate;
 
             // 2. Create new if no close match
             const node = { id: `m_${nodeIdCounter++}`, lat, lng, type: 'MANUAL_ROAD' };
             this.nodes.push(node);
             this.graph.set(node.id, []);
+            addToGrid(node); // Index it
             return node;
         };
 
-        const MAX_SEGMENT_LEN = 5; // High fidelity curves (5m segments)
+        const SNAP_ENDPOINT = 12; // Connect loose ends
+        const SNAP_INTERNAL = 1;  // Strict shape preservation
 
+        const MAX_SEGMENT_LEN = 5;
         const excludedTypes = ['construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished'];
 
         roadSegments.forEach(road => {
             const type = road.properties ? road.properties.type : 'unknown';
-            if (excludedTypes.includes(type)) return; // Skip unusable roads
+            if (excludedTypes.includes(type)) return;
 
             const segment = road.path;
             const oneWay = road.properties ? road.properties.oneWay : false;
+
+            if (segment.length < 2) return;
 
             for (let i = 0; i < segment.length - 1; i++) {
                 const start = segment[i];
                 const end = segment[i + 1];
 
                 const totalDist = this.geoManager._distanceMeters(start, end);
-
-                // Determine Snap Radius for Start Node
-                // Only snap aggressively if it's the very first point of the Way
                 const snapA = (i === 0) ? SNAP_ENDPOINT : SNAP_INTERNAL;
+
+                // Note: Densification logic simplified for performance on massive datasets 
+                // If segment is HUGE (e.g. straight highway), we split. 
+                // But for imported OSM data, nodes are usually dense enough.
+
                 let prevNode = getOrCreateNode(start.lat, start.lng, snapA);
 
-                // Densification: Split long segments
-                if (totalDist > MAX_SEGMENT_LEN) {
+                // Only densify if really long (> 20m) to avoid exploding node count further
+                if (totalDist > 20) {
                     const steps = Math.ceil(totalDist / MAX_SEGMENT_LEN);
-
                     for (let s = 1; s <= steps; s++) {
                         const t = s / steps;
-                        // Interpolate
                         const lat = start.lat + (end.lat - start.lat) * t;
                         const lng = start.lng + (end.lng - start.lng) * t;
 
-                        // Determine Snap Radius
-                        // If it's the final step, it represents the 'end' node of the segment
-                        let currentSnap = SNAP_INTERNAL;
-                        if (s === steps) {
-                            // It's the segment endpoint. Check if it's the ROAD endpoint.
-                            const isLastPoint = (i + 1 === segment.length - 1);
-                            currentSnap = isLastPoint ? SNAP_ENDPOINT : SNAP_INTERNAL;
-                        }
+                        // Endpoint check
+                        const isLastOfSegment = (s === steps);
+                        const isLastOfPath = (i + 1 === segment.length - 1);
+                        const currentSnap = (isLastOfSegment && isLastOfPath) ? SNAP_ENDPOINT : SNAP_INTERNAL;
 
                         const currentNode = getOrCreateNode(lat, lng, currentSnap);
 
-                        // Link prev -> current
-                        const dist = this.geoManager._distanceMeters(prevNode, currentNode);
+                        // Link
+                        const d = this.geoManager._distanceMeters(prevNode, currentNode);
                         if (prevNode.id !== currentNode.id) {
-                            // Link Forward
-                            if (!this.graph.get(prevNode.id).some(n => n.node.id === currentNode.id)) {
-                                this.graph.get(prevNode.id).push({ node: currentNode, weight: dist });
-                            }
-                            // Link Backward (Only if NOT one-way)
+                            this.graph.get(prevNode.id).push({ node: currentNode, weight: d });
                             if (!oneWay) {
-                                if (!this.graph.get(currentNode.id).some(n => n.node.id === prevNode.id)) {
-                                    this.graph.get(currentNode.id).push({ node: prevNode, weight: dist });
-                                }
+                                this.graph.get(currentNode.id).push({ node: prevNode, weight: d });
                             }
                         }
                         prevNode = currentNode;
                     }
-
                 } else {
                     // Standard Link
-                    // Determine Snap Radius for End Node
-                    // Only snap aggressively if it's the very last point of the Way
                     const isLastPoint = (i + 1 === segment.length - 1);
                     const snapB = isLastPoint ? SNAP_ENDPOINT : SNAP_INTERNAL;
-
                     const nodeB = getOrCreateNode(end.lat, end.lng, snapB);
 
-                    if (prevNode.id === nodeB.id) continue;
+                    if (prevNode.id !== nodeB.id) {
+                        const dist = this.geoManager._distanceMeters(prevNode, nodeB);
+                        // Prevent duplicate edges? 
+                        // Graph array search is expensive if many neighbors. 
+                        // But usually degree is low (2-4).
 
-                    const dist = this.geoManager._distanceMeters(prevNode, nodeB);
+                        const edgesA = this.graph.get(prevNode.id);
+                        if (!edgesA.some(e => e.node.id === nodeB.id)) {
+                            edgesA.push({ node: nodeB, weight: dist });
+                        }
 
-                    // Forward Edge (A -> B)
-                    const neighborsA = this.graph.get(prevNode.id);
-                    if (!neighborsA.some(n => n.node.id === nodeB.id)) {
-                        neighborsA.push({ node: nodeB, weight: dist });
-                    }
-
-                    // Backward Edge (B -> A) - Only if NOT one-way
-                    if (!oneWay) {
-                        const neighborsB = this.graph.get(nodeB.id);
-                        if (!neighborsB.some(n => n.node.id === prevNode.id)) {
-                            neighborsB.push({ node: prevNode, weight: dist });
+                        if (!oneWay) {
+                            const edgesB = this.graph.get(nodeB.id);
+                            if (!edgesB.some(e => e.node.id === prevNode.id)) {
+                                edgesB.push({ node: prevNode, weight: dist });
+                            }
                         }
                     }
                 }
             }
         });
 
-        console.log(`PathFinder: Manual Graph built with ${this.nodes.length} nodes (Hybrid Snap: ${SNAP_ENDPOINT}m/${SNAP_INTERNAL}m).`);
+        console.log(`PathFinder: Manual Graph built with ${this.nodes.length} nodes (Optimized Spatial Grid).`);
     }
 
     // Override or Modify findPath to snap to nearest Manual Node

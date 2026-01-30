@@ -857,7 +857,140 @@ try {
     };
 
     // --- Animation Helpers ---
-    // ... (Code omitted for brevity, logic remains same)
+
+    const animatePath = (marker, pathPoints, speedMps) => {
+        // pathPoints is array of {lat, lng}
+        let currentStep = 0;
+
+        const loop = () => {
+            if (!marker.isFollowingPath) return; // Abort if flag cleared
+            if (currentStep >= pathPoints.length - 1) {
+                marker.isFollowingPath = false; // Done
+
+                // Cleanup Traces
+                if (marker.vehicleId && debugTraceLayers[marker.vehicleId]) {
+                    debugTraceLayers[marker.vehicleId].remove();
+                    delete debugTraceLayers[marker.vehicleId];
+                }
+                // Final Pos Update
+                const end = pathPoints[pathPoints.length - 1];
+                if (marker.vehicleId) {
+                    fleetManager.updateVehiclePosition(marker.vehicleId, end.lat, end.lng);
+
+                    // JOB COMPLETION CHECK
+                    const v = fleetManager.getVehicle(marker.vehicleId);
+                    if (v && v.status === 'Job Assigned' && v.currentJobId) {
+                        setTimeout(() => {
+                            console.log(`[Vehicle] ${v.id} finished operation.`);
+                            // jobManager.completeJob(v.currentJobId); 
+                            // Note: We might want real logic here later
+                        }, 5000);
+                    }
+                }
+                return;
+            }
+
+            const start = L.latLng(pathPoints[currentStep]);
+            const end = L.latLng(pathPoints[currentStep + 1]);
+
+            const dist = map.distance(start, end);
+            const duration = (dist / speedMps) * 1000;
+
+            if (duration <= 0) {
+                currentStep++;
+                loop();
+                return;
+            }
+
+            animateMarker(marker, start, end, duration, () => {
+                currentStep++;
+                loop();
+            });
+        };
+
+        marker.setLatLng([pathPoints[0].lat, pathPoints[0].lng]);
+        loop();
+    };
+
+    const animateMarker = (marker, startLatLng, endLatLng, duration, onComplete) => {
+        const startTime = performance.now();
+
+        const animate = (currentTime) => {
+            if (!marker._map) return;
+
+            const elapsed = currentTime - startTime;
+            const t = Math.min(elapsed / duration, 1);
+
+            const lat = startLatLng.lat + (endLatLng.lat - startLatLng.lat) * t;
+            const lng = startLatLng.lng + (endLatLng.lng - startLatLng.lng) * t;
+
+            marker.setLatLng([lat, lng]);
+
+            if (t < 1) {
+                requestAnimationFrame(animate);
+            } else {
+                if (onComplete) onComplete();
+            }
+        };
+        requestAnimationFrame(animate);
+    };
+
+    // --- 3. UI Initialization ---
+    // Create Sub-Panels
+    const depotUI = new DepotUI('yard-container', fleetManager, geoManager, () => renderVehicles());
+    const tosUI = new TOSDashboard(vesselManager, jobManager);
+
+    const updateInfo = (bay, row) => {
+        const zoneId = controls.currentZoneId;
+        if (zoneId) {
+            const containers = yard.getContainersInZone(zoneId);
+            inspector.showZone(zoneId, containers);
+        }
+    };
+
+    const mockRenderer = { selectStack: () => renderApp() };
+    const controls = new ControlPanel(yard, mockRenderer, renderApp, updateInfo);
+
+    // Create Main Burger Menu
+    const mainMenu = new MainMenu({
+        control: null,
+        fleet: depotUI,
+        tos: tosUI
+    });
+
+    let selectedLayer = null;
+
+    // Handler for Zone Clicks
+    const handleZoneClick = (zone, layer) => {
+        console.log(`Clicked Zone ${zone.id} (${zone.type})`);
+
+        if (selectedLayer) {
+            selectedLayer.setStyle({ color: '#111', weight: 1, fillOpacity: 0.5 });
+        }
+
+        selectedLayer = layer;
+        layer.setStyle({ color: '#FFD700', weight: 3, fillOpacity: 0.7 });
+        layer.bringToFront();
+
+        if (zone.type === 'DEPOT') {
+            inspector.hide();
+            depotUI.show();
+        } else {
+            depotUI.hide();
+            const containers = yard.getContainersInZone(zone.id);
+            inspector.showZone(zone.id, containers);
+            controls.setZone(zone.id);
+        }
+    };
+
+    // Handler for Clicks
+    const handleContainerClick = (bay, row, stack) => {
+        // Show Floating UI
+        inspector.show(bay, row, stack);
+        controls.setTarget(bay, row);
+    };
+
+    // --- 4. Controls Integrated Above ---
 
     // TRUCK RENDERER
     const truckMarkers = {}; // Cache
