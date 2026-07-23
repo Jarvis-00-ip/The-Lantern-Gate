@@ -188,7 +188,7 @@ export class DepotUI {
 
     handleDeploy(id, targetZone) {
         if (targetZone === 'DEPOT_RALLE') {
-            this.fleet.recallVehicle(id);
+            this.fleet.recallVehicle(id, this.geoManager);
         } else {
             // Updated to pass GeoManager
             this.fleet.deployVehicle(id, targetZone, this.geoManager);
@@ -231,7 +231,7 @@ export class DepotUI {
                 console.log(`Scheduling ${id} in ${(delayMs / 1000).toFixed(1)}s`);
 
                 setTimeout(() => {
-                    if (isRecall) this.fleet.recallVehicle(id);
+                    if (isRecall) this.fleet.recallVehicle(id, this.geoManager);
                     else this.fleet.deployVehicle(id, targetZone, this.geoManager);
 
                     // Trigger update after THIS specific move starts

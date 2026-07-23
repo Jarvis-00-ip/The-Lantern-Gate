@@ -30,6 +30,11 @@ try {
     const jobManager = new JobManager(fleetManager, yard, geoManager);
     const truckManager = new TruckManager(geoManager, jobManager, yard);
 
+    // Place the fleet on the map (parked in the depot). Without this every
+    // vehicle keeps its placeholder {x:0,y:0} coords and the renderer skips it,
+    // so the simulation opens with an empty map.
+    fleetManager.seedInitialPositions(geoManager);
+
     // Expose Global API
     window.yard = yard;
     window.fleet = fleetManager;
@@ -77,11 +82,18 @@ try {
     L.control.layers(baseMaps).addTo(map);
 
     // DEBUG: Draw Road Graph
-    const debugLayer = L.layerGroup(); // Optional: addTo(map) to see lines
-    // To enable debug, uncomment next line or toggle in console
-    debugLayer.addTo(map);
+    // Disabled by default: drawing every node/edge means ~6000 Leaflet markers
+    // plus thousands of polylines on load, which chokes the map. Toggle from the
+    // console with window.__toggleGraphDebug() when you need to inspect the mesh.
+    const DEBUG_GRAPH = false;
+    const debugLayer = L.layerGroup();
+    window.__toggleGraphDebug = () => {
+        if (map.hasLayer(debugLayer)) map.removeLayer(debugLayer);
+        else debugLayer.addTo(map);
+    };
 
-    if (pathFinder.nodes.length > 0) {
+    if (DEBUG_GRAPH && pathFinder.nodes.length > 0) {
+        debugLayer.addTo(map);
         console.log("Drawing Debug Graph...", pathFinder.graph);
         pathFinder.nodes.forEach(node => {
             // Visualize only nodes to save performance, or limited edges
@@ -281,11 +293,12 @@ try {
 
     renderRoads();
 
-    // Initialize PathFinder with Persistent Roads
-    if (manualRoads.length > 0) {
-        pathFinder.setManualMode(true);
-        pathFinder.updateGraphFromPolylines(manualRoads);
-    }
+    // Enable manual routing. The PathFinder constructor already built the graph
+    // from ROAD_NETWORK *plus* the highway connector spine; rebuilding here from
+    // manualRoads (ROAD_NETWORK only) would silently drop that spine and cut the
+    // Genova-Ovest truck spawn off from the port network. So we just switch mode
+    // and keep the graph that already includes everything.
+    pathFinder.setManualMode(true);
 
     // Log Coordinates on Change
     if (map.pm) {
@@ -804,8 +817,12 @@ try {
                 const hasContainer = !!v.carriedContainer;
                 const icon = getVehicleIcon(v.type, hasContainer);
 
-                const depotCenter = geoManager.getZoneCenter('DEPOT_RALLE');
-                let startPos = depotCenter ? L.latLng(depotCenter.lat, depotCenter.lng) : targetLatLng;
+                // Spawn the marker where the vehicle actually is. Vehicles are
+                // seeded in the depot at startup, so this places the whole parked
+                // fleet correctly and avoids a burst of pathfinding on first frame.
+                let startPos = (v.position && v.position.lat)
+                    ? L.latLng(v.position.lat, v.position.lng)
+                    : targetLatLng;
 
                 marker = L.marker(startPos, { icon: icon, draggable: true }).addTo(vehicleLayer);
                 marker.vehicleId = v.id; // Attach ID for tracking
