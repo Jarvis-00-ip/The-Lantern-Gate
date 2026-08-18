@@ -51,6 +51,7 @@ export class Truck {
         this.assignedJobId = null;
         this.targetContainerId = null; // For Imports, what are we fetching?
         this.isPaused = false;
+        this.isOversize = false; // Out-of-gauge load: uses the OOG gate, not the normal lanes
     }
 }
 
@@ -71,9 +72,12 @@ export class TruckManager {
         // Settings
         this.gateProcessingTimeMs = 2000;
         this.ocrProcessingTimeMs = 1000;
+        // Out-of-gauge loads need the dedicated gate and take longer to clear.
+        this.oversizeGateProcessingTimeMs = 6000;
+        this.oversizeSpawnChance = 0.12;
     }
 
-    spawnTruck(requestedType = null) {
+    spawnTruck(requestedType = null, options = {}) {
         // 0. Safety Check
         const spawnZone = this.geoManager.getZoneCenter(TruckRoute.SPAWN);
         if (!spawnZone) return null;
@@ -122,6 +126,9 @@ export class TruckManager {
         const plate = `GEN-${Math.floor(Math.random() * 900) + 100}`;
 
         const truck = new Truck(id, plate, containerId, missionType);
+        truck.isOversize = options.oversize !== undefined
+            ? options.oversize
+            : Math.random() < this.oversizeSpawnChance;
         truck.targetZone = TruckRoute.CUSTOMS_IN; // First stop: customs at the real gate
         if (missionType === 'PICK_IMPORT') {
             truck.targetContainerId = targetContainerId;
@@ -137,8 +144,19 @@ export class TruckManager {
         };
 
         this.trucks.push(truck);
-        console.log(`[TruckManager] Truck ${id} (${plate}) spawned at Genova Ovest. Mission: ${missionType}.`);
+        console.log(`[TruckManager] Truck ${id} (${plate}) spawned at Genova Ovest. Mission: ${missionType}${truck.isOversize ? ' [FUORI SAGOMA]' : ''}.`);
         return truck;
+    }
+
+    /**
+     * Entry gate for a truck. Oversize loads use the dedicated out-of-gauge
+     * gate; everything else uses the normal lanes. This is the only place that
+     * decides, so GATE_OOG can never leak into the standard itinerary.
+     * @param {Truck} truck
+     * @returns {string} Zone id
+     */
+    entryGateFor(truck) {
+        return truck.isOversize ? GATE_OUT_OF_GAUGE : TruckRoute.LANES_IN;
     }
 
     update(dt) {
@@ -213,9 +231,9 @@ export class TruckManager {
 
             // ... (Gate/Yard logic remains similar, just ensure status flow)
 
-            // 2. GATE_QUEUE -> ENTRY LANES (east of the OCR, next to the yard)
+            // 2. GATE_QUEUE -> the truck's own entry gate (normal lanes, or OOG)
             if (t.status === TruckStatus.GATE_QUEUE) {
-                const center = this.geoManager.getZoneCenter(TruckRoute.LANES_IN);
+                const center = this.geoManager.getZoneCenter(this.entryGateFor(t));
                 if (center) {
                     const dist = this.geoManager._distanceMeters(t.position, center);
                     if (dist < 20) this.handleGateArrival(t);
@@ -321,15 +339,15 @@ export class TruckManager {
 
         setTimeout(() => {
             truck.status = TruckStatus.GATE_QUEUE;
-            truck.targetZone = TruckRoute.LANES_IN;
-            console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to entry lanes.`);
+            truck.targetZone = this.entryGateFor(truck);
+            console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to ${truck.isOversize ? 'OUT-OF-GAUGE gate' : 'entry lanes'}.`);
         }, this.ocrProcessingTimeMs);
     }
 
     handleGateArrival(truck) {
         if (truck.status === TruckStatus.GATE_CHECK) return;
         truck.status = TruckStatus.GATE_CHECK;
-        console.log(`[Gate] Checking paperwork for ${truck.plate}...`);
+        console.log(`[Gate] Checking paperwork for ${truck.plate}${truck.isOversize ? ' at the out-of-gauge gate' : ''}...`);
 
         setTimeout(() => {
             let jobType = 'TRUCK_EXPORT';
@@ -351,8 +369,8 @@ export class TruckManager {
             this.jobManager.assignJobToNearestVehicle(job.id);
 
             truck.status = TruckStatus.TO_YARD;
-            console.log(`[Gate] Access Granted.Proceed to ${truck.targetZone}.`);
-        }, this.gateProcessingTimeMs);
+            console.log(`[Gate] Access Granted. Proceed to ${truck.targetZone}.`);
+        }, truck.isOversize ? this.oversizeGateProcessingTimeMs : this.gateProcessingTimeMs);
     }
 
     handleGateExit(truck) {

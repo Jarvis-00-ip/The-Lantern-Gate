@@ -52,7 +52,8 @@ export class MainMenu {
             { id: 'map', label: '🌍 Map Options', action: () => this.togglePanel('map') },
             { isDivider: true },
             { id: 'sim_trk_exp', label: '🎮 Spawn Truck (Export)', action: () => window.truckManager && window.truckManager.spawnTruck('DROP_EXPORT') },
-            { id: 'sim_trk_imp', label: '🎮 Spawn Truck (Import)', action: () => window.truckManager && window.truckManager.spawnTruck('PICK_IMPORT') }
+            { id: 'sim_trk_imp', label: '🎮 Spawn Truck (Import)', action: () => window.truckManager && window.truckManager.spawnTruck('PICK_IMPORT') },
+            { id: 'sim_trk_oog', label: '📐 Spawn Truck (Fuori Sagoma)', action: () => window.truckManager && window.truckManager.spawnTruck(null, { oversize: true }) }
         ];
 
         items.forEach(item => {
