@@ -40,6 +40,31 @@ export class FleetManager {
         }
     }
 
+    /**
+     * Places every vehicle at a real geographic point inside the home depot.
+     * Without this the fleet is created with placeholder {x:0,y:0} coordinates
+     * (no lat/lng), so the renderer skips them and the map opens empty.
+     * @param {Object} geoManager - Instance of GeoManager
+     */
+    seedInitialPositions(geoManager) {
+        const depotCenter = geoManager.getZoneCenter('DEPOT_RALLE');
+        if (!depotCenter) return;
+        this.vehicles.forEach(v => {
+            // Small jitter (~±10m) around the depot centre so the fleet spreads
+            // out visually but stays close enough that the renderer treats it as
+            // "parked" instead of triggering a convergence move on load.
+            const jitterLat = (Math.random() - 0.5) * 0.00018; // ~±10m
+            const jitterLng = (Math.random() - 0.5) * 0.00025; // ~±10m
+            v.position = {
+                lat: depotCenter.lat + jitterLat,
+                lng: depotCenter.lng + jitterLng,
+                rotation: Math.random() * 360
+            };
+            v.currentZone = 'DEPOT_RALLE';
+            v.deployedZone = 'DEPOT_RALLE';
+        });
+    }
+
     getVehicles() {
         return this.vehicles;
     }
@@ -174,13 +199,21 @@ export class FleetManager {
         return nearest;
     }
 
-    recallVehicle(id) {
+    recallVehicle(id, geoManager = null) {
         const v = this.getVehicle(id);
         if (v) {
             v.status = VehicleStatus.IDLE;
             v.currentZone = 'DEPOT_RALLE';
             v.assignedBlock = null;
-            v.position = { x: 0, y: 0, rotation: 0 }; // Reset
+            v.currentJobId = null;
+            // Send it back to a real point in the depot instead of {x:0,y:0},
+            // otherwise the renderer drops the marker and the vehicle vanishes.
+            const spot = geoManager
+                ? (geoManager.getRandomPointInZone('DEPOT_RALLE') || geoManager.getZoneCenter('DEPOT_RALLE'))
+                : null;
+            v.position = spot
+                ? { lat: spot.lat, lng: spot.lng, rotation: 0 }
+                : { x: 0, y: 0, rotation: 0 };
             return true;
         }
         return false;
