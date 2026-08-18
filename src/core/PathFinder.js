@@ -206,12 +206,24 @@ export class PathFinder {
         }
     }
 
-    initRoadGraph() {
-        console.log("PathFinder: Building Graph from ROAD_NETWORK...");
+    /**
+     * Rebuilds the navigation graph from a set of road polylines, always
+     * splicing in the highway connector. Every caller must go through here:
+     * calling updateGraphFromPolylines() directly with the editable road list
+     * silently drops the connector and strands the Genova-Ovest truck spawn.
+     * @param {Array} roads - Road segments ({ path, properties })
+     */
+    rebuildFromRoads(roads) {
+        this.updateGraphFromPolylines([...roads, ...this.getHighwayConnector()]);
+    }
 
-        // INJECT HIGHWAY CONNECTION: Genova Ovest (Spawn) <-> Port Road Network
-        // Updated to pass through DOGANA areas
-        const highway = [
+    /**
+     * The synthetic motorway spine linking the Genova-Ovest toll booth to the
+     * port gates via the customs areas. It is not part of the editable road
+     * network, so it lives here and is re-added on every rebuild.
+     */
+    getHighwayConnector() {
+        return [
             // Main Spine from Casello to Port Area
             {
                 path: [
@@ -240,9 +252,11 @@ export class PathFinder {
                 properties: { type: 'primary', oneway: false }
             }
         ];
+    }
 
-        const allRoads = [...ROAD_NETWORK, ...highway];
-        this.updateGraphFromPolylines(allRoads);
+    initRoadGraph() {
+        console.log("PathFinder: Building Graph from ROAD_NETWORK...");
+        this.rebuildFromRoads(ROAD_NETWORK);
     }
 
 

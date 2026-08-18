@@ -11,6 +11,7 @@ import { JobManager } from '../core/JobManager.js';
 import { TruckManager } from '../core/TruckManager.js';
 import { MainMenu } from './MainMenu.js';
 import { TOSDashboard } from './TOSDashboard.js';
+import { StorageManager, StorageKeys } from '../core/StorageManager.js';
 
 console.log("Initializing The Lantern Gate UI (Geospatial Mode)...");
 
@@ -29,6 +30,7 @@ try {
     const vesselManager = new VesselManager();
     const jobManager = new JobManager(fleetManager, yard, geoManager);
     const truckManager = new TruckManager(geoManager, jobManager, yard);
+    const storage = new StorageManager();
 
     // Place the fleet on the map (parked in the depot). Without this every
     // vehicle keeps its placeholder {x:0,y:0} coords and the renderer skips it,
@@ -187,8 +189,38 @@ try {
 
     // Store Manual Roads (Load from Persistence)
     // Structure: { path: LatLngs[], properties: { oneWay: boolean } }
+    // NOTE: closures below mutate this array in place (push / length = 0), so
+    // its identity must never change — always replace contents, never reassign.
     const manualRoads = [...ROAD_NETWORK];
     const roadLayerGroup = L.layerGroup().addTo(map);
+
+    // Restore a previously edited network, falling back to the bundled one.
+    const savedRoads = await storage.load(StorageKeys.ROADS, null);
+    if (Array.isArray(savedRoads) && savedRoads.length > 0) {
+        manualRoads.length = 0;
+        // Appended one by one: spreading thousands of segments into push()
+        // risks blowing the argument limit.
+        for (const road of savedRoads) manualRoads.push(road);
+
+        const when = await storage.savedAt(StorageKeys.ROADS);
+        console.log(`[Storage] Restored ${manualRoads.length} road segments (saved ${when}).`);
+    }
+
+    /**
+     * Persists the current network and rebuilds the routing graph.
+     * Every road mutation funnels through here so the two can never drift.
+     */
+    const persistAndRebuildRoads = async () => {
+        pathFinder.setManualMode(true);
+        pathFinder.rebuildFromRoads(manualRoads);
+
+        const ok = await storage.save(StorageKeys.ROADS, manualRoads);
+        if (ok) {
+            const kb = Math.round((await storage.usageBytes()) / 1024);
+            console.log(`[Storage] Saved ${manualRoads.length} road segments (${kb} KB).`);
+        }
+        updateStorageStatus();
+    };
 
     // Helper: Add Arrow Decorator for One-Way
     const addArrow = (polyline, color) => {
@@ -282,9 +314,7 @@ try {
                         if (!road.properties) road.properties = {};
                         road.properties.oneWay = !road.properties.oneWay;
                         renderRoads(); // Re-render logic
-                        // Update PathFinder
-                        pathFinder.setManualMode(true);
-                        pathFinder.updateGraphFromPolylines(manualRoads);
+                        persistAndRebuildRoads();
                     }
                 });
             }
@@ -293,12 +323,14 @@ try {
 
     renderRoads();
 
-    // Enable manual routing. The PathFinder constructor already built the graph
-    // from ROAD_NETWORK *plus* the highway connector spine; rebuilding here from
-    // manualRoads (ROAD_NETWORK only) would silently drop that spine and cut the
-    // Genova-Ovest truck spawn off from the port network. So we just switch mode
-    // and keep the graph that already includes everything.
+    // Enable manual routing. The constructor already built the graph from the
+    // bundled ROAD_NETWORK, so we only pay for a rebuild when a restored
+    // network is actually in play. rebuildFromRoads() re-adds the highway
+    // connector either way, so the truck spawn stays reachable.
     pathFinder.setManualMode(true);
+    if (Array.isArray(savedRoads) && savedRoads.length > 0) {
+        pathFinder.rebuildFromRoads(manualRoads);
+    }
 
     // Log Coordinates on Change
     if (map.pm) {
@@ -322,9 +354,8 @@ try {
 
                 renderRoads();
 
-                // Update PathFinder Live
-                pathFinder.setManualMode(true);
-                pathFinder.updateGraphFromPolylines(manualRoads);
+                // Update PathFinder Live + persist
+                persistAndRebuildRoads();
 
             } else {
                 logZoneCoordinates(e.layer);
@@ -364,6 +395,66 @@ try {
     };
 
     const exportBtn = createExportButton();
+
+    // Reset Button: drop the locally saved network and go back to the bundled one
+    const createResetButton = () => {
+        const btn = document.createElement('button');
+        btn.innerHTML = '↩️ Reset Roads';
+        btn.className = 'btn btn-danger';
+        btn.style.position = 'absolute';
+        btn.style.top = '10px';
+        btn.style.right = '620px'; // Left of Spawn Trucks
+        btn.style.zIndex = '1000';
+        btn.style.display = 'none'; // Mapping mode only
+        btn.id = 'btn-reset-roads';
+
+        btn.onclick = async () => {
+            if (!confirm("Discard your saved road network and restore the bundled one?\nThis cannot be undone.")) return;
+
+            await storage.remove(StorageKeys.ROADS);
+
+            manualRoads.length = 0;
+            for (const road of ROAD_NETWORK) manualRoads.push(road);
+
+            renderRoads();
+            pathFinder.rebuildFromRoads(manualRoads);
+            updateStorageStatus();
+
+            alert("Road network reset to the bundled default.");
+        };
+
+        document.body.appendChild(btn);
+        return btn;
+    };
+
+    const resetBtn = createResetButton();
+
+    // Small status readout so it is obvious whether edits are being kept
+    const storageStatus = document.createElement('div');
+    storageStatus.id = 'storage-status';
+    storageStatus.style.cssText = `
+        position: absolute; top: 44px; right: 200px; z-index: 1000;
+        font-size: 0.7rem; color: #8b949e; background: rgba(13,17,23,0.8);
+        padding: 2px 8px; border-radius: 4px; display: none;
+    `;
+    document.body.appendChild(storageStatus);
+
+    async function updateStorageStatus() {
+        if (!storage.available) {
+            storageStatus.textContent = '⚠️ Storage unavailable — changes will not persist';
+            storageStatus.style.color = '#f78166';
+            return;
+        }
+
+        if (await storage.has(StorageKeys.ROADS)) {
+            const kb = Math.round((await storage.usageBytes()) / 1024);
+            storageStatus.textContent = `💾 Saved locally · ${manualRoads.length} segments · ${kb} KB`;
+            storageStatus.style.color = '#3fb950';
+        } else {
+            storageStatus.textContent = `📦 Bundled network · ${manualRoads.length} segments`;
+            storageStatus.style.color = '#8b949e';
+        }
+    }
 
     // OSM Import Logic
     const createImportButton = () => {
@@ -472,9 +563,8 @@ try {
                 // Re-render
                 renderRoads();
 
-                // Update PathFinder
-                pathFinder.setManualMode(true);
-                pathFinder.updateGraphFromPolylines(manualRoads);
+                // Update PathFinder + persist
+                await persistAndRebuildRoads();
 
                 alert(`Successfully imported ${count} road segments from OpenStreetMap!`);
 
@@ -548,6 +638,9 @@ try {
             renderRoads(); // Refresh visibility based on mode
             exportBtn.style.display = isMapping ? 'block' : 'none';
             importBtn.style.display = isMapping ? 'block' : 'none';
+            resetBtn.style.display = isMapping ? 'block' : 'none';
+            storageStatus.style.display = isMapping ? 'block' : 'none';
+            if (isMapping) updateStorageStatus();
             console.log("Editor Mode:", isMapping);
 
             // Re-render to clear/restore layers if needed
