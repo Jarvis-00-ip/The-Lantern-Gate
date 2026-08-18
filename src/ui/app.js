@@ -12,7 +12,11 @@ import { TruckManager } from '../core/TruckManager.js';
 import { MainMenu } from './MainMenu.js';
 import { TOSDashboard } from './TOSDashboard.js';
 import { StorageManager, StorageKeys } from '../core/StorageManager.js';
+import { renderBuildStamp } from '../core/version.js';
 
+// Stamp the build into the header before anything else can fail, so a stale
+// cached page is always distinguishable from a fresh deploy.
+console.log(`The Lantern Gate — build ${renderBuildStamp()}`);
 console.log("Initializing The Lantern Gate UI (Geospatial Mode)...");
 
 if (typeof L === 'undefined') {
@@ -1135,7 +1139,10 @@ try {
             // Create if missing
             if (!marker) {
                 // Default Icon
-                const iconHtml = `<div style="background: #4caf50; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>`;
+                // Out-of-gauge loads get their own colour so it is obvious why
+                // they head for a different gate.
+                const baseColor = t.isOversize ? '#e3b341' : '#4caf50';
+                const iconHtml = `<div style="background: ${baseColor}; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>`;
                 const icon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [16, 16] });
                 marker = L.marker([t.position.lat, t.position.lng], { icon: icon }).addTo(map);
                 marker.bindPopup(`<b>${t.id}</b><br>${t.plate}<br>${t.status}`);
@@ -1162,9 +1169,10 @@ try {
                             z-index: 10;
                         "></div>`;
                 }
+                const baseColor = t.isOversize ? '#e3b341' : '#4caf50';
                 const iconHtml = `
                     <div style="position: relative;">
-                        <div style="background: #4caf50; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>
+                        <div style="background: ${baseColor}; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>
                         ${containerHtml}
                     </div>`;
 
@@ -1180,7 +1188,7 @@ try {
             else if (t.status === 'Departing') statusLabel = '🔙 Leaving';
 
             // Update Popup
-            marker.setPopupContent(`<b>${t.plate}</b><br>${t.status}<br>${statusLabel}<br>${hasContainer ? '📦 Loaded' : 'Empty'}`);
+            marker.setPopupContent(`<b>${t.plate}</b>${t.isOversize ? ' <span style="color:#e3b341">📐 FUORI SAGOMA</span>' : ''}<br>${t.status}<br>${statusLabel}<br>${hasContainer ? '📦 Loaded' : 'Empty'}`);
 
             // PAUSE LOGIC: If paused, stop movement
             if (t.isPaused) {
