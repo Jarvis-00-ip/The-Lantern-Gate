@@ -233,20 +233,20 @@ export class PathFinder {
                 ],
                 properties: { type: 'motorway', oneway: false }
             },
-            // Branch to DOGANA IN (Ingresso)
+            // Branch down to the port gate area (customs in / OCR)
             {
                 path: [
                     { lat: 44.41100, lng: 8.904000 },
-                    { lat: 44.40965, lng: 8.905500 }, // DOGANA IN
+                    { lat: 44.40965, lng: 8.905500 }, // Approach to the gate area
                     { lat: 44.40660, lng: 8.907800 }  // Connect to OCR/Gate Area
                 ],
                 properties: { type: 'primary', oneway: false }
             },
-            // Branch from DOGANA OUT (Uscita)
+            // Branch back to the motorway from the exit gate
             {
                 path: [
                     { lat: 44.40714, lng: 8.904790 }, // GATE OUT
-                    { lat: 44.40865, lng: 8.904250 }, // DOGANA OUT
+                    { lat: 44.40865, lng: 8.904250 }, // Northbound leg
                     { lat: 44.41100, lng: 8.904000 }  // Merge back to Highway
                 ],
                 properties: { type: 'primary', oneway: false }

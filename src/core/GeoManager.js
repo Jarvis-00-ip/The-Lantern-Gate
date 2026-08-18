@@ -149,7 +149,7 @@ export class GeoManager {
                 ]
             },
             {
-                id: 'GATE_IN', type: 'GATE',
+                id: 'GATE_IN', type: 'GATE', description: 'Dogana / Varco Ingresso',
                 vertices: [
                     { "lat": 44.406212, "lng": 8.904971 },
                     { "lat": 44.406091, "lng": 8.904794 },
@@ -158,7 +158,7 @@ export class GeoManager {
                 ]
             },
             {
-                id: 'GATE_OUT', type: 'GATE',
+                id: 'GATE_OUT', type: 'GATE', description: 'Dogana / Varco Uscita',
                 vertices: [
                     { "lat": 44.40714, "lng": 8.904792 },
                     { "lat": 44.406961, "lng": 8.904899 },
@@ -175,26 +175,11 @@ export class GeoManager {
                     { "lat": 44.406584, "lng": 8.907897 }
                 ]
             },
-            {
-                id: 'DOGANA_IN', type: 'GATE', description: 'Dogana Ingresso',
-                // Placed between Highway Spawn and OCR
-                vertices: [
-                    { "lat": 44.40950, "lng": 8.90550 },
-                    { "lat": 44.40980, "lng": 8.90550 },
-                    { "lat": 44.40980, "lng": 8.90600 },
-                    { "lat": 44.40950, "lng": 8.90600 }
-                ]
-            },
-            {
-                id: 'DOGANA_OUT', type: 'GATE', description: 'Dogana Uscita',
-                // Placed after Gate Out, before Highway Despawn
-                vertices: [
-                    { "lat": 44.40850, "lng": 8.90400 },
-                    { "lat": 44.40880, "lng": 8.90400 },
-                    { "lat": 44.40880, "lng": 8.90450 },
-                    { "lat": 44.40850, "lng": 8.90450 }
-                ]
-            },
+            // NOTE: the former DOGANA_IN / DOGANA_OUT zones were removed. They were
+            // synthetic placeholders (axis-aligned rectangles on round coordinates,
+            // "placed between highway and OCR") that did not correspond to anything
+            // on the ground. Customs is handled at GATE_IN / GATE_OUT, which are
+            // real traced polygons.
             {
                 id: 'SPAWN_POINT_1', type: 'GATE', description: 'Casello Genova Ovest',
                 vertices: [
@@ -214,6 +199,31 @@ export class GeoManager {
                 ]
             },
             {
+                // Truck gate lanes, immediately east of the OCR portal and right
+                // next to the yard. These are the real entry/exit for trucks:
+                // GATE_IN / GATE_OUT sit ~235m WEST of the OCR, so routing through
+                // them sent trucks backwards past the out-of-gauge gate.
+                id: 'TRUCK_LANES_IN', type: 'GATE', description: '3 Corsie Ingresso (dopo varco OCR)',
+                vertices: [
+                    { "lat": 44.406093, "lng": 8.910714 },
+                    { "lat": 44.405996, "lng": 8.910656 },
+                    { "lat": 44.405919, "lng": 8.910989 },
+                    { "lat": 44.406022, "lng": 8.911059 }
+                ]
+            },
+            {
+                // Shares its southern edge with TRUCK_LANES_IN — same gate complex.
+                id: 'TRUCK_LANES_OUT', type: 'GATE', description: '2 Corsie Uscita Camion',
+                vertices: [
+                    { "lat": 44.406206, "lng": 8.910763 },
+                    { "lat": 44.406092, "lng": 8.910719 },
+                    { "lat": 44.406022, "lng": 8.911059 },
+                    { "lat": 44.406166, "lng": 8.911106 }
+                ]
+            },
+            {
+                // Reserved for out-of-gauge loads ONLY — never part of the
+                // standard truck route.
                 id: 'GATE_OOG', type: 'GATE', description: 'Fuori Sagoma',
                 vertices: [
                     { "lat": 44.406271, "lng": 8.907463 },

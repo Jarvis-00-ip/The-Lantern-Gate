@@ -1,3 +1,30 @@
+/**
+ * The truck itinerary, in order. Kept in one place because the previous
+ * layout scattered zone IDs across handlers, which is how the route ended up
+ * doubling back: the gate it used sits ~235m WEST of the OCR portal, so trucks
+ * drove past the out-of-gauge gate twice on every run.
+ *
+ * Ground truth: customs is performed at the real GATE_IN / GATE_OUT polygons.
+ * Longitude must increase on the way in and decrease on the way out — any
+ * violation of that means the route is doubling back again.
+ */
+export const TruckRoute = {
+    SPAWN: 'SPAWN_POINT_1',      // Casello Genova Ovest
+    CUSTOMS_IN: 'GATE_IN',       // Dogana / varco ingresso  (lng 8.90500)
+    OCR: 'OCR_GATE',             // Varco OCR                (lng 8.90786)
+    LANES_IN: 'TRUCK_LANES_IN',  // 3 corsie ingresso        (lng 8.91085)
+    YARD: 'WAITING_CAMION',      // Scarico / carico         (lng 8.91020)
+    LANES_OUT: 'TRUCK_LANES_OUT',// 2 corsie uscita          (lng 8.91091)
+    CUSTOMS_OUT: 'GATE_OUT',     // Dogana / varco uscita    (lng 8.90498)
+    DESPAWN: 'DESPAWN_POINT_1'   // Uscita Genova Ovest
+};
+
+/**
+ * Out-of-gauge gate. Deliberately NOT in TruckRoute: only oversized loads use
+ * it, and it must never appear in the standard itinerary.
+ */
+export const GATE_OUT_OF_GAUGE = 'GATE_OOG';
+
 export const TruckStatus = {
     INBOUND: 'Inbound',
     CUSTOMS_IN: 'Customs In',
@@ -20,7 +47,7 @@ export class Truck {
         this.missionType = missionType; // 'DROP_EXPORT' or 'PICK_IMPORT'
         this.status = TruckStatus.INBOUND;
         this.position = { lat: 0, lng: 0 };
-        this.targetZone = 'OCR_GATE'; // First stop
+        this.targetZone = TruckRoute.CUSTOMS_IN; // Overwritten by spawnTruck()
         this.assignedJobId = null;
         this.targetContainerId = null; // For Imports, what are we fetching?
         this.isPaused = false;
@@ -48,7 +75,7 @@ export class TruckManager {
 
     spawnTruck(requestedType = null) {
         // 0. Safety Check
-        const spawnZone = this.geoManager.getZoneCenter('SPAWN_POINT_1');
+        const spawnZone = this.geoManager.getZoneCenter(TruckRoute.SPAWN);
         if (!spawnZone) return null;
 
         const entryPoint = spawnZone;
@@ -95,7 +122,7 @@ export class TruckManager {
         const plate = `GEN-${Math.floor(Math.random() * 900) + 100}`;
 
         const truck = new Truck(id, plate, containerId, missionType);
-        truck.targetZone = 'DOGANA_IN'; // NEW FLOW: First stop is Customs
+        truck.targetZone = TruckRoute.CUSTOMS_IN; // First stop: customs at the real gate
         if (missionType === 'PICK_IMPORT') {
             truck.targetContainerId = targetContainerId;
         }
@@ -161,9 +188,9 @@ export class TruckManager {
             t.isPaused = tooClose;
             if (tooClose) return;
 
-            // 1. INBOUND -> DOGANA_IN
+            // 1. INBOUND -> CUSTOMS IN (GATE_IN)
             if (t.status === TruckStatus.INBOUND) {
-                const center = this.geoManager.getZoneCenter('DOGANA_IN');
+                const center = this.geoManager.getZoneCenter(TruckRoute.CUSTOMS_IN);
                 if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
                     this.handleCustomsArrival(t, 'IN');
                 }
@@ -177,8 +204,8 @@ export class TruckManager {
             // 2. TO OCR (Transition state, status might still be CUSTOMS_IN but target is OCR)
             // Actually, let's use a specific status or just check target.
             // Simplified: If target is OCR_GATE, check arrival.
-            if (t.targetZone === 'OCR_GATE' && t.status !== TruckStatus.OCR_PROCESS) {
-                const center = this.geoManager.getZoneCenter('OCR_GATE');
+            if (t.targetZone === TruckRoute.OCR && t.status !== TruckStatus.OCR_PROCESS) {
+                const center = this.geoManager.getZoneCenter(TruckRoute.OCR);
                 if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
                     this.handleOCRArrival(t);
                 }
@@ -186,9 +213,9 @@ export class TruckManager {
 
             // ... (Gate/Yard logic remains similar, just ensure status flow)
 
-            // 2. GATE_QUEUE -> GATE_IN
+            // 2. GATE_QUEUE -> ENTRY LANES (east of the OCR, next to the yard)
             if (t.status === TruckStatus.GATE_QUEUE) {
-                const center = this.geoManager.getZoneCenter('GATE_IN');
+                const center = this.geoManager.getZoneCenter(TruckRoute.LANES_IN);
                 if (center) {
                     const dist = this.geoManager._distanceMeters(t.position, center);
                     if (dist < 20) this.handleGateArrival(t);
@@ -220,23 +247,22 @@ export class TruckManager {
                         }
 
                         t.status = TruckStatus.EXITING;
-                        t.targetZone = 'GATE_OUT';
+                        t.targetZone = TruckRoute.LANES_OUT;
                     }
                 }
             }
 
-            // 5. EXITING -> GATE_OUT
+            // 5. EXITING -> EXIT LANES
             if (t.status === TruckStatus.EXITING) {
-                const center = this.geoManager.getZoneCenter('GATE_OUT');
+                const center = this.geoManager.getZoneCenter(TruckRoute.LANES_OUT);
                 if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
                     this.handleGateExit(t);
                 }
             }
 
-            // 6. GATE_OUT -> DOGANA_OUT
+            // 6. EXIT LANES -> CUSTOMS OUT (GATE_OUT), the last stop before the highway
             if (t.status === TruckStatus.CUSTOMS_OUT) {
-                // Moving to Dogana Out
-                const center = this.geoManager.getZoneCenter('DOGANA_OUT');
+                const center = this.geoManager.getZoneCenter(TruckRoute.CUSTOMS_OUT);
                 if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
                     this.handleCustomsArrival(t, 'OUT');
                 }
@@ -244,7 +270,7 @@ export class TruckManager {
 
             // 7. DEPARTING -> DESPAWN
             if (t.status === TruckStatus.DEPARTING) {
-                const center = this.geoManager.getZoneCenter('DESPAWN_POINT_1');
+                const center = this.geoManager.getZoneCenter(TruckRoute.DESPAWN);
                 if (center) {
                     const dist = this.geoManager._distanceMeters(t.position, center);
                     if (dist < 20) {
@@ -262,21 +288,21 @@ export class TruckManager {
 
         if (type === 'IN') {
             truck.status = TruckStatus.CUSTOMS_IN;
-            console.log(`[Customs IN] Inspecting ${truck.plate}...`);
+            console.log(`[Customs IN] Inspecting ${truck.plate} at ${TruckRoute.CUSTOMS_IN}...`);
             setTimeout(() => {
                 truck.isProcessingCustoms = false;
                 truck.status = TruckStatus.INBOUND; // Reset to allow movement logic to pick up next target?
                 // Actually, let's just set target.
-                truck.targetZone = 'OCR_GATE';
+                truck.targetZone = TruckRoute.OCR;
                 console.log(`[Customs IN] Cleared. Proceed to OCR.`);
             }, 2000);
         } else {
             // OUT
-            console.log(`[Customs OUT] Final Check ${truck.plate}...`);
+            console.log(`[Customs OUT] Final Check ${truck.plate} at ${TruckRoute.CUSTOMS_OUT}...`);
             setTimeout(() => {
                 truck.isProcessingCustoms = false;
                 truck.status = TruckStatus.DEPARTING;
-                truck.targetZone = 'DESPAWN_POINT_1';
+                truck.targetZone = TruckRoute.DESPAWN;
                 console.log(`[Customs OUT] Cleared. Proceed to Highway.`);
             }, 2000);
         }
@@ -295,8 +321,8 @@ export class TruckManager {
 
         setTimeout(() => {
             truck.status = TruckStatus.GATE_QUEUE;
-            truck.targetZone = 'GATE_IN';
-            console.log(`[OCR] Scan Complete for ${truck.plate}.Proceeding to Gate Queue.`);
+            truck.targetZone = TruckRoute.LANES_IN;
+            console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to entry lanes.`);
         }, this.ocrProcessingTimeMs);
     }
 
@@ -337,9 +363,9 @@ export class TruckManager {
 
         setTimeout(() => {
             truck.isExitingGate = false;
-            truck.status = TruckStatus.CUSTOMS_OUT; // Next stop: Dogana Out
-            truck.targetZone = 'DOGANA_OUT';
-            console.log(`[Gate OUT] Cleared. Proceed to Dogana Out.`);
+            truck.status = TruckStatus.CUSTOMS_OUT; // Next stop: customs at GATE_OUT
+            truck.targetZone = TruckRoute.CUSTOMS_OUT;
+            console.log(`[Gate OUT] Cleared. Proceed to customs (${TruckRoute.CUSTOMS_OUT}).`);
         }, 3000);
     }
 
