@@ -1,5 +1,52 @@
 import { ROAD_NETWORK } from './RoadNetworkData.js';
 
+/**
+ * Cost multipliers per OSM road class. A* weighs edges by distance alone
+ * otherwise, which is why trucks would cut through residential hill streets
+ * whenever that shaved a few metres off the motorway approach.
+ *
+ * IMPORTANT: every factor must be >= 1.0. The A* heuristic is straight-line
+ * distance in metres, so it only stays admissible (never overestimates) while
+ * no edge is cheaper than its true length. Discounting a road class below 1.0
+ * silently breaks optimality.
+ *
+ * `service` is kept low on purpose: terminal internal roads are tagged that
+ * way, and making them expensive would wreck routing inside the yard.
+ */
+export const ROAD_COST = {
+    motorway: 1.0, motorway_link: 1.0,
+    trunk: 1.0, trunk_link: 1.0,
+    primary: 1.1, primary_link: 1.1,
+    secondary: 1.25, secondary_link: 1.25,
+    tertiary: 1.45, tertiary_link: 1.45,
+    service: 1.3,
+    unclassified: 1.8,
+    road: 1.8,
+    residential: 2.6,
+    living_street: 3.2,
+    track: 3.2,
+    pedestrian: 6.0,
+    footway: 6.0
+};
+
+export const DEFAULT_ROAD_COST = 1.6;
+
+/**
+ * Ways no vehicle can use, kept out of the routing graph entirely.
+ * They are still drawn on the map — they exist, trucks just cannot drive them.
+ * Verified: excluding these leaves every leg of the truck route connected and
+ * actually shortens it, because the pedestrian "shortcuts" it used to take
+ * were detours in disguise.
+ */
+export const NON_DRIVABLE_TYPES = [
+    // Not built / no longer there
+    'construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished',
+    // Rail
+    'rail', 'subway', 'tram', 'railway', 'train', 'light_rail', 'narrow_gauge',
+    // Not for vehicles
+    'footway', 'pedestrian', 'steps', 'cycleway', 'path', 'bridleway', 'corridor'
+];
+
 export class PathFinder {
     constructor(geoManager) {
         this.geoManager = geoManager;
@@ -8,6 +55,44 @@ export class PathFinder {
         this.manualMode = false;
         // Don't init auto graph if not needed, or let it stick as fallback
         this.initRoadGraph();
+    }
+
+    /**
+     * Converts a real distance into a routing cost by road class.
+     * @param {number} meters - True edge length.
+     * @param {string} type - OSM highway/railway class.
+     * @returns {number} Weight in "cost metres" (always >= meters).
+     */
+    _edgeCost(meters, type) {
+        const factor = ROAD_COST[type] !== undefined ? ROAD_COST[type] : DEFAULT_ROAD_COST;
+        return meters * factor;
+    }
+
+    /**
+     * Breaks a computed route down by road class. Used to check that traffic
+     * actually prefers main roads rather than trusting the weights blindly.
+     * @param {Array} path - Points returned by findPath().
+     * @returns {Object} { totalMeters, byType: { type: meters } }
+     */
+    describeRoute(path) {
+        const byType = {};
+        let totalMeters = 0;
+        if (!path || path.length < 2) return { totalMeters, byType };
+
+        for (let i = 0; i < path.length - 1; i++) {
+            const a = this._findClosestNode(path[i]);
+            const b = this._findClosestNode(path[i + 1]);
+            if (!a || !b) continue;
+
+            const meters = this.geoManager._distanceMeters(path[i], path[i + 1]);
+            totalMeters += meters;
+
+            const edge = (this.graph.get(a.id) || []).find(e => e.node.id === b.id);
+            const type = edge ? (edge.type || 'unknown') : 'unknown';
+            byType[type] = (byType[type] || 0) + meters;
+        }
+
+        return { totalMeters, byType };
     }
 
     setManualMode(enabled) {
@@ -78,12 +163,9 @@ export class PathFinder {
         const SNAP_INTERNAL = 1;  // Strict shape preservation
 
         const MAX_SEGMENT_LEN = 5;
-        const excludedTypes = ['construction', 'proposed', 'razed', 'abandoned', 'disused', 'demolished',
-            'rail', 'subway', 'tram', 'railway', 'construction', 'train'];
-
         roadSegments.forEach(road => {
             const type = road.properties ? road.properties.type : 'unknown';
-            if (excludedTypes.includes(type)) return;
+            if (NON_DRIVABLE_TYPES.includes(type)) return;
             // Additional check for OSM tags if properties.type is generic
             if (road.properties && (road.properties.railway || road.properties.train)) return;
 
@@ -122,10 +204,11 @@ export class PathFinder {
 
                         // Link
                         const d = this.geoManager._distanceMeters(prevNode, currentNode);
+                        const w = this._edgeCost(d, type);
                         if (prevNode.id !== currentNode.id) {
-                            this.graph.get(prevNode.id).push({ node: currentNode, weight: d });
+                            this.graph.get(prevNode.id).push({ node: currentNode, weight: w, type });
                             if (!oneWay) {
-                                this.graph.get(currentNode.id).push({ node: prevNode, weight: d });
+                                this.graph.get(currentNode.id).push({ node: prevNode, weight: w, type });
                             }
                         }
                         prevNode = currentNode;
@@ -142,15 +225,17 @@ export class PathFinder {
                         // Graph array search is expensive if many neighbors. 
                         // But usually degree is low (2-4).
 
+                        const w = this._edgeCost(dist, type);
+
                         const edgesA = this.graph.get(prevNode.id);
                         if (!edgesA.some(e => e.node.id === nodeB.id)) {
-                            edgesA.push({ node: nodeB, weight: dist });
+                            edgesA.push({ node: nodeB, weight: w, type });
                         }
 
                         if (!oneWay) {
                             const edgesB = this.graph.get(nodeB.id);
                             if (!edgesB.some(e => e.node.id === prevNode.id)) {
-                                edgesB.push({ node: prevNode, weight: dist });
+                                edgesB.push({ node: prevNode, weight: w, type });
                             }
                         }
                     }
