@@ -102,11 +102,14 @@ export class RouteEditor {
             const meters = drawn ? Math.round(this.routeBook.lengthMeters(leg.from, leg.to)) : 0;
             const points = drawn ? this.routeBook.get(leg.from, leg.to).length : 0;
 
+            const fonte = this.routeBook.sourceOf(leg.from, leg.to);
             const badge = capturing
                 ? `<span style="color:#e3b341;">✏️ disegna sulla mappa…</span>`
-                : drawn
-                    ? `<span style="color:#3fb950;">✓ tracciato · ${points} punti · ${meters} m</span>`
-                    : `<span style="color:#8b949e;">automatico</span>`;
+                : fonte === 'locale'
+                    ? `<span style="color:#3fb950;">✓ tuo tracciato · ${points} punti · ${meters} m</span>`
+                    : fonte === 'default'
+                        ? `<span style="color:#58a6ff;">◆ di serie · ${points} punti · ${meters} m</span>`
+                        : `<span style="color:#8b949e;">automatico</span>`;
 
             return `
                 <div style="padding:8px 0; border-bottom:1px solid #21262d;">
@@ -123,9 +126,10 @@ export class RouteEditor {
                                        background:${capturing ? '#e3b341' : '#1f6feb'}; color:${capturing ? '#000' : '#fff'};">
                                 ${capturing ? 'Annulla' : (drawn ? 'Ridisegna' : 'Disegna')}
                             </button>
-                            <button data-act="del" data-i="${i}" ${drawn ? '' : 'disabled'}
+                            <button data-act="del" data-i="${i}" ${fonte === 'locale' ? '' : 'disabled'}
+                                title="${fonte === 'locale' ? 'Cancella il tuo tracciato e torna a quello di serie' : ''}"
                                 style="font-size:0.72rem; padding:4px 7px; cursor:${drawn ? 'pointer' : 'default'};
-                                       background:#21262d; color:${drawn ? '#f78166' : '#484f58'};
+                                       background:#21262d; color:${fonte === 'locale' ? '#f78166' : '#484f58'};
                                        border:1px solid #30363d; border-radius:4px;">🗑</button>
                         </div>
                     </div>
@@ -141,9 +145,9 @@ export class RouteEditor {
             };
         });
 
-        const n = this.routeBook.count();
+        const n = this.routeBook.count(), miei = this.routeBook.overrideCount();
         this.element.querySelector('#route-count').textContent =
-            `${n} di ${TRUCK_LEGS.length} tratte tracciate a mano`;
+            `${n} di ${TRUCK_LEGS.length} tratte tracciate${miei ? ` · ${miei} modificate da te` : ''}`;
     }
 
     // --- Drawing ---
@@ -203,7 +207,10 @@ export class RouteEditor {
     }
 
     _delete(leg) {
-        if (!confirm(`Cancellare il percorso tracciato per "${leg.label}"?\nLa tratta tornerà al calcolo automatico.`)) return;
+        const tornaA = this.routeBook.sourceOf(leg.from, leg.to) === 'locale' &&
+            Object.prototype.hasOwnProperty.call(this.routeBook.routes, `${leg.from}>${leg.to}`)
+            ? 'al percorso di serie' : 'al calcolo automatico';
+        if (!confirm(`Cancellare il tuo tracciato per "${leg.label}"?\nLa tratta tornerà ${tornaA}.`)) return;
         this.routeBook.remove(leg.from, leg.to);
         this.routeBook.persist();
         this.onChange();
@@ -211,7 +218,7 @@ export class RouteEditor {
     }
 
     _clearAll() {
-        if (!confirm('Cancellare TUTTI i percorsi tracciati?\nTutte le tratte torneranno al calcolo automatico.')) return;
+        if (!confirm('Cancellare tutti i TUOI tracciati?\nI percorsi di serie restano attivi.')) return;
         this.routeBook.clear();
         this.routeBook.persist();
         this.onChange();

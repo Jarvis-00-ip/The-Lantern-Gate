@@ -183,6 +183,19 @@ export class TruckManager {
      * target change goes through here so `previousZone` -> `targetZone` always
      * names the leg being driven — which is how a hand-drawn route is matched.
      */
+    /**
+     * Whether a truck counts as having reached a zone: inside its polygon, or
+     * within `radius` of the centre for zones it may stop just short of.
+     * The polygon test matters for long zones — and for hand-drawn routes,
+     * whose author ends the line where trucks actually stop rather than at the
+     * geometric centroid.
+     */
+    _hasArrived(truck, zoneId, radius = 20) {
+        if (this.geoManager.isInsideZone(truck.position, zoneId)) return true;
+        const centre = this.geoManager.getZoneCenter(zoneId);
+        return !!centre && this.geoManager._distanceMeters(truck.position, centre) < radius;
+    }
+
     _setTarget(truck, zone) {
         if (truck.targetZone && truck.targetZone !== zone) {
             truck.previousZone = truck.targetZone;
@@ -239,8 +252,7 @@ export class TruckManager {
 
             // 1. INBOUND -> CUSTOMS IN (GATE_IN)
             if (t.status === TruckStatus.INBOUND) {
-                const center = this.geoManager.getZoneCenter(TruckRoute.CUSTOMS_IN);
-                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                if (this._hasArrived(t, TruckRoute.CUSTOMS_IN)) {
                     this.handleCustomsArrival(t, 'IN');
                 }
             }
@@ -254,8 +266,7 @@ export class TruckManager {
             // Actually, let's use a specific status or just check target.
             // Simplified: If target is OCR_GATE, check arrival.
             if (t.targetZone === TruckRoute.OCR && t.status !== TruckStatus.OCR_PROCESS) {
-                const center = this.geoManager.getZoneCenter(TruckRoute.OCR);
-                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                if (this._hasArrived(t, TruckRoute.OCR)) {
                     this.handleOCRArrival(t);
                 }
             }
@@ -264,20 +275,12 @@ export class TruckManager {
 
             // 2. GATE_QUEUE -> the truck's own entry gate (normal lanes, or OOG)
             if (t.status === TruckStatus.GATE_QUEUE) {
-                const center = this.geoManager.getZoneCenter(this.entryGateFor(t));
-                if (center) {
-                    const dist = this.geoManager._distanceMeters(t.position, center);
-                    if (dist < 20) this.handleGateArrival(t);
-                }
+                if (this._hasArrived(t, this.entryGateFor(t))) this.handleGateArrival(t);
             }
 
             // 3. TO_YARD
             if (t.status === TruckStatus.TO_YARD && t.targetZone) {
-                const target = this.geoManager.getZoneCenter(t.targetZone);
-                if (target) {
-                    const dist = this.geoManager._distanceMeters(t.position, target);
-                    if (dist < 25) this.handleYardArrival(t);
-                }
+                if (this._hasArrived(t, t.targetZone, 25)) this.handleYardArrival(t);
             }
 
             // 4. SERVICING
@@ -303,26 +306,22 @@ export class TruckManager {
 
             // 5. EXITING -> EXIT LANES
             if (t.status === TruckStatus.EXITING) {
-                const center = this.geoManager.getZoneCenter(TruckRoute.LANES_OUT);
-                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                if (this._hasArrived(t, TruckRoute.LANES_OUT)) {
                     this.handleGateExit(t);
                 }
             }
 
             // 6. EXIT LANES -> CUSTOMS OUT (GATE_OUT), the last stop before the highway
             if (t.status === TruckStatus.CUSTOMS_OUT) {
-                const center = this.geoManager.getZoneCenter(TruckRoute.CUSTOMS_OUT);
-                if (center && this.geoManager._distanceMeters(t.position, center) < 20) {
+                if (this._hasArrived(t, TruckRoute.CUSTOMS_OUT)) {
                     this.handleCustomsArrival(t, 'OUT');
                 }
             }
 
             // 7. DEPARTING -> DESPAWN
             if (t.status === TruckStatus.DEPARTING) {
-                const center = this.geoManager.getZoneCenter(TruckRoute.DESPAWN);
-                if (center) {
-                    const dist = this.geoManager._distanceMeters(t.position, center);
-                    if (dist < 20) {
+                if (this._hasArrived(t, TruckRoute.DESPAWN)) {
+                    {
                         t.status = TruckStatus.DEPARTED;
                         console.log(`[LifeCycle] Truck ${t.plate} despawned at Genova Ovest.`);
                     }
