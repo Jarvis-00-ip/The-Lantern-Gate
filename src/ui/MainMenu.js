@@ -54,7 +54,10 @@ export class MainMenu {
             { isDivider: true },
             { id: 'sim_trk_exp', label: '🎮 Spawn Truck (Export)', action: () => window.truckManager && window.truckManager.spawnTruck('DROP_EXPORT') },
             { id: 'sim_trk_imp', label: '🎮 Spawn Truck (Import)', action: () => window.truckManager && window.truckManager.spawnTruck('PICK_IMPORT') },
-            { id: 'sim_trk_oog', label: '📐 Spawn Truck (Fuori Sagoma)', action: () => window.truckManager && window.truckManager.spawnTruck(null, { oversize: true }) }
+            { id: 'sim_trk_oog', label: '📐 Spawn Truck (Fuori Sagoma)', action: () => window.truckManager && window.truckManager.spawnTruck(null, { oversize: true }) },
+            { isDivider: true },
+            { id: 'sim_rtg_exp', label: '🏗️ Transtainer: Export', action: () => window.transtainer && window.transtainer.requestExport() },
+            { id: 'sim_rtg_imp', label: '📥 Transtainer: Import', action: () => window.transtainer && window.transtainer.requestImport() }
         ];
 
         items.forEach(item => {

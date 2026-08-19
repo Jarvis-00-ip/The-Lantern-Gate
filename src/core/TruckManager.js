@@ -243,9 +243,7 @@ export class TruckManager {
      * geometric centroid.
      */
     _hasArrived(truck, zoneId, radius = 20) {
-        if (this.geoManager.isInsideZone(truck.position, zoneId)) return true;
-        const centre = this.geoManager.getZoneCenter(zoneId);
-        return !!centre && this.geoManager._distanceMeters(truck.position, centre) < radius;
+        return this.geoManager.hasArrived(truck.position, zoneId, radius);
     }
 
     _setTarget(truck, zone) {

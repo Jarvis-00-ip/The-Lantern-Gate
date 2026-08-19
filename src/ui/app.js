@@ -9,6 +9,7 @@ import { ROAD_NETWORK } from '../core/RoadNetworkData.js';
 import { VesselManager } from '../core/VesselManager.js';
 import { JobManager } from '../core/JobManager.js';
 import { TruckManager, TRUCK_LEGS } from '../core/TruckManager.js';
+import { TranstainerManager } from '../core/TranstainerManager.js';
 import { MainMenu } from './MainMenu.js';
 import { TOSDashboard } from './TOSDashboard.js';
 import { StorageManager, StorageKeys } from '../core/StorageManager.js';
@@ -37,6 +38,7 @@ try {
     const vesselManager = new VesselManager();
     const jobManager = new JobManager(fleetManager, yard, geoManager);
     const truckManager = new TruckManager(geoManager, jobManager, yard);
+    const transtainerManager = new TranstainerManager(geoManager, fleetManager, yard);
     const storage = new StorageManager();
 
     // Place the fleet on the map (parked in the depot). Without this every
@@ -50,6 +52,7 @@ try {
     window.vesselManager = vesselManager;
     window.jobManager = jobManager;
     window.truckManager = truckManager;
+    window.transtainer = transtainerManager;
     window.geo = geoManager;
 
     // ...
@@ -1405,6 +1408,7 @@ try {
         // Updates
         if (truckManager) truckManager.update(dt);
         if (jobManager) jobManager.update(dt);
+        if (transtainerManager) transtainerManager.update(dt);
 
         // Renders
         renderTrucks();

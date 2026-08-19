@@ -181,10 +181,7 @@ export class JobManager {
      * arrival test; the radius is a fallback for zones with no polygon info.
      */
     _hasArrivedAtZone(pos, zoneId, radius = 20) {
-        if (!pos || !zoneId) return false;
-        if (this.geoManager.isInsideZone(pos, zoneId)) return true;
-        const centre = this.geoManager.getZoneCenter(zoneId);
-        return !!centre && this.geoManager._distanceMeters(pos, centre) < radius;
+        return this.geoManager.hasArrived(pos, zoneId, radius);
     }
 
     _performPickup(job, vehicle) {
