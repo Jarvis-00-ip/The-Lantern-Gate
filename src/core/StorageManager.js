@@ -15,7 +15,8 @@ export const SCHEMA_VERSION = 1;
 
 /** Well-known slots, so callers never hand-write key strings. */
 export const StorageKeys = {
-    ROADS: 'roads'
+    ROADS: 'roads',
+    TRUCK_ROUTES: 'truckRoutes'
 };
 
 export class StorageManager {

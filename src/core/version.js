@@ -8,7 +8,7 @@
  *
  * Bump VERSION and BUILD_DATE together in this file — nowhere else.
  */
-export const VERSION = '0.2.0';
+export const VERSION = '0.3.0';
 export const BUILD_DATE = '2026-08-18';
 
 /** Short human-readable build stamp, e.g. "v0.2.0 · 18/08/2026". */

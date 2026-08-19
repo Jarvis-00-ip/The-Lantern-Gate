@@ -25,6 +25,24 @@ export const TruckRoute = {
  */
 export const GATE_OUT_OF_GAUGE = 'GATE_OOG';
 
+/**
+ * The itinerary broken into legs, in travel order. This is what the route
+ * editor offers for hand-drawing: automatic routing works off OSM data, which
+ * does not always reflect how the terminal is actually driven, so an operator
+ * can override any single leg without touching the others.
+ */
+export const TRUCK_LEGS = [
+    { from: TruckRoute.SPAWN,       to: TruckRoute.CUSTOMS_IN,  label: 'Autostrada → Dogana ingresso' },
+    { from: TruckRoute.CUSTOMS_IN,  to: TruckRoute.OCR,         label: 'Dogana ingresso → Varco OCR' },
+    { from: TruckRoute.OCR,         to: TruckRoute.LANES_IN,    label: 'Varco OCR → Corsie ingresso' },
+    { from: TruckRoute.OCR,         to: GATE_OUT_OF_GAUGE,      label: 'Varco OCR → Varco fuori sagoma', oversize: true },
+    { from: TruckRoute.LANES_IN,    to: TruckRoute.YARD,        label: 'Corsie ingresso → Piazzale' },
+    { from: GATE_OUT_OF_GAUGE,      to: TruckRoute.YARD,        label: 'Varco fuori sagoma → Piazzale', oversize: true },
+    { from: TruckRoute.YARD,        to: TruckRoute.LANES_OUT,   label: 'Piazzale → Corsie uscita' },
+    { from: TruckRoute.LANES_OUT,   to: TruckRoute.CUSTOMS_OUT, label: 'Corsie uscita → Dogana uscita' },
+    { from: TruckRoute.CUSTOMS_OUT, to: TruckRoute.DESPAWN,     label: 'Dogana uscita → Autostrada' }
+];
+
 export const TruckStatus = {
     INBOUND: 'Inbound',
     CUSTOMS_IN: 'Customs In',
@@ -52,6 +70,7 @@ export class Truck {
         this.targetContainerId = null; // For Imports, what are we fetching?
         this.isPaused = false;
         this.isOversize = false; // Out-of-gauge load: uses the OOG gate, not the normal lanes
+        this.previousZone = TruckRoute.SPAWN; // Where it is coming from; identifies the current leg
     }
 }
 
@@ -157,6 +176,18 @@ export class TruckManager {
      */
     entryGateFor(truck) {
         return truck.isOversize ? GATE_OUT_OF_GAUGE : TruckRoute.LANES_IN;
+    }
+
+    /**
+     * Moves a truck's destination on, remembering where it came from. Every
+     * target change goes through here so `previousZone` -> `targetZone` always
+     * names the leg being driven — which is how a hand-drawn route is matched.
+     */
+    _setTarget(truck, zone) {
+        if (truck.targetZone && truck.targetZone !== zone) {
+            truck.previousZone = truck.targetZone;
+        }
+        truck.targetZone = zone;
     }
 
     update(dt) {
@@ -265,7 +296,7 @@ export class TruckManager {
                         }
 
                         t.status = TruckStatus.EXITING;
-                        t.targetZone = TruckRoute.LANES_OUT;
+                        this._setTarget(t, TruckRoute.LANES_OUT);
                     }
                 }
             }
@@ -311,7 +342,7 @@ export class TruckManager {
                 truck.isProcessingCustoms = false;
                 truck.status = TruckStatus.INBOUND; // Reset to allow movement logic to pick up next target?
                 // Actually, let's just set target.
-                truck.targetZone = TruckRoute.OCR;
+                this._setTarget(truck, TruckRoute.OCR);
                 console.log(`[Customs IN] Cleared. Proceed to OCR.`);
             }, 2000);
         } else {
@@ -320,7 +351,7 @@ export class TruckManager {
             setTimeout(() => {
                 truck.isProcessingCustoms = false;
                 truck.status = TruckStatus.DEPARTING;
-                truck.targetZone = TruckRoute.DESPAWN;
+                this._setTarget(truck, TruckRoute.DESPAWN);
                 console.log(`[Customs OUT] Cleared. Proceed to Highway.`);
             }, 2000);
         }
@@ -339,7 +370,7 @@ export class TruckManager {
 
         setTimeout(() => {
             truck.status = TruckStatus.GATE_QUEUE;
-            truck.targetZone = this.entryGateFor(truck);
+            this._setTarget(truck, this.entryGateFor(truck));
             console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to ${truck.isOversize ? 'OUT-OF-GAUGE gate' : 'entry lanes'}.`);
         }, this.ocrProcessingTimeMs);
     }
@@ -361,7 +392,7 @@ export class TruckManager {
                 jobType = 'TRUCK_IMPORT';
             }
 
-            truck.targetZone = targetZone;
+            this._setTarget(truck, targetZone);
             const containerId = truck.missionType === 'DROP_EXPORT' ? truck.containerId : truck.targetContainerId;
 
             const job = this.jobManager.createJob(jobType, containerId, targetZone, 'YARD');
@@ -382,7 +413,7 @@ export class TruckManager {
         setTimeout(() => {
             truck.isExitingGate = false;
             truck.status = TruckStatus.CUSTOMS_OUT; // Next stop: customs at GATE_OUT
-            truck.targetZone = TruckRoute.CUSTOMS_OUT;
+            this._setTarget(truck, TruckRoute.CUSTOMS_OUT);
             console.log(`[Gate OUT] Cleared. Proceed to customs (${TruckRoute.CUSTOMS_OUT}).`);
         }, 3000);
     }

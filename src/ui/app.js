@@ -8,11 +8,13 @@ import { PathFinder } from '../core/PathFinder.js';
 import { ROAD_NETWORK } from '../core/RoadNetworkData.js';
 import { VesselManager } from '../core/VesselManager.js';
 import { JobManager } from '../core/JobManager.js';
-import { TruckManager } from '../core/TruckManager.js';
+import { TruckManager, TRUCK_LEGS } from '../core/TruckManager.js';
 import { MainMenu } from './MainMenu.js';
 import { TOSDashboard } from './TOSDashboard.js';
 import { StorageManager, StorageKeys } from '../core/StorageManager.js';
 import { renderBuildStamp } from '../core/version.js';
+import { RouteBook } from '../core/RouteBook.js';
+import { RouteEditor } from './RouteEditor.js';
 
 // Stamp the build into the header before anything else can fail, so a stale
 // cached page is always distinguishable from a fresh deploy.
@@ -198,6 +200,12 @@ try {
     const manualRoads = [...ROAD_NETWORK];
     const roadLayerGroup = L.layerGroup().addTo(map);
 
+    // Hand-drawn truck routes. Loaded before anything moves so a saved drawing
+    // is in force from the first frame.
+    const routeBook = new RouteBook(storage, geoManager);
+    await routeBook.load();
+    window.routeBook = routeBook;
+
     // Restore a previously edited network, falling back to the bundled one.
     const savedRoads = await storage.load(StorageKeys.ROADS, null);
     if (Array.isArray(savedRoads) && savedRoads.length > 0) {
@@ -343,6 +351,15 @@ try {
 
             if (e.shape === 'Line') {
                 const latlngs = e.layer.getLatLngs();
+
+                // A leg being captured takes priority: the line is a truck route,
+                // not a new piece of road network.
+                if (routeEditor && routeEditor.isCapturing()) {
+                    routeEditor.capture(latlngs.map(p => ({ lat: p.lat, lng: p.lng })));
+                    e.layer.remove();
+                    renderTruckRoutes();
+                    return;
+                }
 
                 // New Road Object
                 const newRoad = {
@@ -643,6 +660,7 @@ try {
             exportBtn.style.display = isMapping ? 'block' : 'none';
             importBtn.style.display = isMapping ? 'block' : 'none';
             resetBtn.style.display = isMapping ? 'block' : 'none';
+            renderTruckRoutes();
             storageStatus.style.display = isMapping ? 'block' : 'none';
             if (isMapping) updateStorageStatus();
             console.log("Editor Mode:", isMapping);
@@ -654,6 +672,36 @@ try {
 
     // Debug Traces Store
     const debugTraceLayers = {};
+
+    // Hand-drawn truck routes, shown while mapping so they can be checked.
+    const truckRouteLayer = L.layerGroup().addTo(map);
+
+    const renderTruckRoutes = () => {
+        truckRouteLayer.clearLayers();
+        const isMapping = document.getElementById('mode-switch')?.checked;
+        if (!isMapping) return; // only clutters the simulation view
+
+        TRUCK_LEGS.forEach(leg => {
+            const pts = routeBook.get(leg.from, leg.to);
+            if (!pts) return;
+
+            const color = leg.oversize ? '#e3b341' : '#a371f7';
+            L.polyline(pts, { color, weight: 5, opacity: 0.85 })
+                .addTo(truckRouteLayer)
+                .bindTooltip(`${leg.label} · ${Math.round(routeBook.lengthMeters(leg.from, leg.to))} m`);
+
+            // Direction marker at the end, so the way round is obvious
+            const last = pts[pts.length - 1];
+            L.marker([last.lat, last.lng], {
+                interactive: false,
+                icon: L.divIcon({
+                    className: 'route-end',
+                    html: `<div style="width:9px;height:9px;border-radius:50%;background:${color};border:2px solid #fff;"></div>`,
+                    iconSize: [13, 13], iconAnchor: [6, 6]
+                })
+            }).addTo(truckRouteLayer);
+        });
+    };
 
     // Main Render Function: Draws zones on the map
     const renderApp = () => {
@@ -1067,6 +1115,14 @@ try {
     const depotUI = new DepotUI('yard-container', fleetManager, geoManager, () => renderVehicles());
     const tosUI = new TOSDashboard(vesselManager, jobManager);
 
+    // Route editor: draw the path trucks actually take, leg by leg.
+    const routeEditor = new RouteEditor({
+        routeBook,
+        geoManager,
+        map,
+        onChange: () => renderTruckRoutes()
+    });
+
     const updateInfo = (bay, row) => {
         const zoneId = controls.currentZoneId;
         if (zoneId) {
@@ -1082,7 +1138,8 @@ try {
     const mainMenu = new MainMenu({
         control: null,
         fleet: depotUI,
-        tos: tosUI
+        tos: tosUI,
+        routes: routeEditor
     });
 
     let selectedLayer = null;
@@ -1204,9 +1261,13 @@ try {
                     const dist = map.distance(currentLatLng, [targetCenter.lat, targetCenter.lng]);
 
                     if (dist > 4) {
-                        // Find Path
                         const start = { lat: currentLatLng.lat, lng: currentLatLng.lng };
-                        const path = pathFinder.findPath(start, t.targetZone);
+
+                        // A hand-drawn route for this leg wins over automatic
+                        // routing: the operator knows the site, OSM data does not.
+                        const drawn = routeBook.get(t.previousZone, t.targetZone);
+                        const path = drawn || pathFinder.findPath(start, t.targetZone);
+                        if (drawn) marker.usingDrawnRoute = true;
 
                         if (path && path.length > 0) {
                             const fullPath = [start, ...path, { lat: targetCenter.lat, lng: targetCenter.lng }];
@@ -1282,6 +1343,7 @@ try {
     // Start
     initMockData();
     renderApp();
+    renderTruckRoutes();
     console.log("UI Ready - Leaflet Map Active.");
 
     // --- 6. Global Simulation Loop ---

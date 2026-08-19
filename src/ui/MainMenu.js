@@ -50,6 +50,7 @@ export class MainMenu {
             { id: 'fleet', label: '🚜 Fleet & Depot', action: () => this.togglePanel('fleet') },
             { id: 'tos', label: '🧠 TOS Ops', action: () => this.togglePanel('tos') },
             { id: 'map', label: '🌍 Map Options', action: () => this.togglePanel('map') },
+            { id: 'routes', label: '🛣️ Percorsi Camion', action: () => this.togglePanel('routes') },
             { isDivider: true },
             { id: 'sim_trk_exp', label: '🎮 Spawn Truck (Export)', action: () => window.truckManager && window.truckManager.spawnTruck('DROP_EXPORT') },
             { id: 'sim_trk_imp', label: '🎮 Spawn Truck (Import)', action: () => window.truckManager && window.truckManager.spawnTruck('PICK_IMPORT') },
@@ -131,6 +132,9 @@ export class MainMenu {
                 if (this.panels.tos) {
                     this.panels.tos.isVisible ? this.panels.tos.hide() : this.panels.tos.show();
                 }
+                break;
+            case 'routes':
+                if (this.panels.routes) this.panels.routes.toggle();
                 break;
             case 'map':
                 // Focus on floating Toolbar if needed, or open a map settings modal
