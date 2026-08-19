@@ -122,8 +122,7 @@ export class JobManager {
             // State Machine for Job Execution
             if (job.status === JobStatus.ASSIGNED) {
                 // PHASE 1: Moving to Source
-                const dist = this._getDistanceToZone(vehicle.position, job.sourceZone);
-                if (dist < 20) {
+                if (this._hasArrivedAtZone(vehicle.position, job.sourceZone) && this._sourceReady(job)) {
                     console.log(`[Job] Vehicle ${vehicle.id} arrived at Source ${job.sourceZone}. Starting operations...`);
                     job.status = 'PICKING_UP';
                     vehicle.status = 'Operating (Pick)';
@@ -135,8 +134,7 @@ export class JobManager {
             }
             else if (job.status === JobStatus.IN_PROGRESS) {
                 // PHASE 2: Moving to Target
-                const dist = this._getDistanceToZone(vehicle.position, job.targetZone);
-                if (dist < 20) {
+                if (this._hasArrivedAtZone(vehicle.position, job.targetZone, 25)) {
                     console.log(`[Job] Vehicle ${vehicle.id} arrived at Target ${job.targetZone}. Dropping off...`);
                     job.status = 'DROPPING_OFF';
                     vehicle.status = 'Operating (Drop)';
@@ -149,10 +147,44 @@ export class JobManager {
         });
     }
 
-    _getDistanceToZone(pos, zoneId) {
-        const center = this.geoManager.getZoneCenter(zoneId);
-        if (!center || !pos) return Infinity;
-        return this.geoManager._distanceMeters(pos, center);
+    /**
+     * Whether the source side of a job is actually ready for pickup.
+     *
+     * TRUCK_EXPORT jobs are dispatched the moment a truck clears OCR (see
+     * TruckManager.handleOCRArrival), so the reach stacker can start driving
+     * over well before the truck has physically parked. Without this guard, a
+     * reach stacker arriving first would "pick up" a container that is still
+     * sitting on a truck stuck in gate-check traffic: the truck's containerId
+     * never gets cleared (the lookup in _performPickup finds nothing), so it
+     * shows as loaded forever, while the yard gains a phantom container that
+     * was never really unloaded. Requiring the truck to be Servicing — parked,
+     * past its own gate-check — means the machine simply waits if it beats
+     * the truck there, exactly like a crane idling for its next box.
+     */
+    _sourceReady(job) {
+        if (job.type !== 'TRUCK_EXPORT') return true;
+        const truckManager = window.truckManager;
+        if (!truckManager) return true; // no truck layer to check against (e.g. tests)
+        const truck = truckManager.getTrucks().find(t => t.containerId === job.containerId);
+        return !!truck && truck.status === 'Servicing';
+    }
+
+    /**
+     * Whether a vehicle counts as having reached a zone for job purposes.
+     *
+     * Checking distance to the zone CENTRE alone broke the moment vehicles
+     * started parking in slots spread across a zone (WAITING_CAMION is ~127m
+     * long): a reach stacker properly parked at its own slot could sit 40-60m
+     * from the centroid, past the 20m radius, and the job would sit ASSIGNED
+     * forever — the machine visibly parked, the job invisibly stuck. Being
+     * inside the polygon counts as arrived, same as TruckManager's own
+     * arrival test; the radius is a fallback for zones with no polygon info.
+     */
+    _hasArrivedAtZone(pos, zoneId, radius = 20) {
+        if (!pos || !zoneId) return false;
+        if (this.geoManager.isInsideZone(pos, zoneId)) return true;
+        const centre = this.geoManager.getZoneCenter(zoneId);
+        return !!centre && this.geoManager._distanceMeters(pos, centre) < radius;
     }
 
     _performPickup(job, vehicle) {

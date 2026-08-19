@@ -15,6 +15,7 @@ await import('./oversize.test.js');
 await import('./routebook.test.js');
 await import('./defaultroutes.test.js');
 await import('./parking.test.js');
+await import('./dispatch.test.js');
 
 const failed = await run();
 process.exit(failed > 0 ? 1 : 0);

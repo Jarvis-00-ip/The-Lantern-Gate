@@ -425,7 +425,28 @@ export class TruckManager {
             truck.status = TruckStatus.GATE_QUEUE;
             this._setTarget(truck, this.entryGateFor(truck));
             console.log(`[OCR] Scan Complete for ${truck.plate}. Proceeding to ${truck.isOversize ? 'OUT-OF-GAUGE gate' : 'entry lanes'}.`);
+
+            // Dispatch the yard machine the moment the truck clears OCR, instead
+            // of waiting for it to physically park (~15-20s later). The reach
+            // stacker starts driving over — or is already there and waiting —
+            // by the time the truck finishes its own gate-check leg. The actual
+            // pickup still waits for the truck to arrive (see JobManager
+            // _sourceReady): this only makes the machine start moving earlier.
+            this._dispatchYardJob(truck);
         }, this.ocrProcessingTimeMs);
+    }
+
+    /**
+     * Creates the yard-side job for a truck and assigns the nearest available
+     * machine, without waiting for the truck itself to have arrived anywhere.
+     */
+    _dispatchYardJob(truck) {
+        const jobType = truck.missionType === 'DROP_EXPORT' ? 'TRUCK_EXPORT' : 'TRUCK_IMPORT';
+        const containerId = truck.missionType === 'DROP_EXPORT' ? truck.containerId : truck.targetContainerId;
+
+        const job = this.jobManager.createJob(jobType, containerId, 'WAITING_CAMION', 'YARD');
+        truck.assignedJobId = job.id;
+        this.jobManager.assignJobToNearestVehicle(job.id);
     }
 
     handleGateArrival(truck) {
@@ -434,24 +455,9 @@ export class TruckManager {
         console.log(`[Gate] Checking paperwork for ${truck.plate}${truck.isOversize ? ' at the out-of-gauge gate' : ''}...`);
 
         setTimeout(() => {
-            let jobType = 'TRUCK_EXPORT';
-            let targetZone = 'WAITING_CAMION';
-
-            if (truck.missionType === 'DROP_EXPORT') {
-                targetZone = 'WAITING_CAMION';
-                jobType = 'TRUCK_EXPORT';
-            } else {
-                targetZone = 'WAITING_CAMION'; // Or specific stack if we had logic
-                jobType = 'TRUCK_IMPORT';
-            }
-
-            this._setTarget(truck, targetZone);
-            const containerId = truck.missionType === 'DROP_EXPORT' ? truck.containerId : truck.targetContainerId;
-
-            const job = this.jobManager.createJob(jobType, containerId, targetZone, 'YARD');
-            truck.assignedJobId = job.id;
-            this.jobManager.assignJobToNearestVehicle(job.id);
-
+            // The yard job was already dispatched when the truck cleared OCR;
+            // this leg only moves the truck itself the rest of the way in.
+            this._setTarget(truck, 'WAITING_CAMION');
             truck.status = TruckStatus.TO_YARD;
             console.log(`[Gate] Access Granted. Proceed to ${truck.targetZone}.`);
         }, truck.isOversize ? this.oversizeGateProcessingTimeMs : this.gateProcessingTimeMs);
