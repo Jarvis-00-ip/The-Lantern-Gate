@@ -71,6 +71,8 @@ export class Truck {
         this.isPaused = false;
         this.isOversize = false; // Out-of-gauge load: uses the OOG gate, not the normal lanes
         this.previousZone = TruckRoute.SPAWN; // Where it is coming from; identifies the current leg
+        this.parkingZone = null;  // Zone whose slot it holds
+        this.parkingSlot = null;  // Slot index, so trucks do not stack up when stopped
     }
 }
 
@@ -94,6 +96,54 @@ export class TruckManager {
         // Out-of-gauge loads need the dedicated gate and take longer to clear.
         this.oversizeGateProcessingTimeMs = 6000;
         this.oversizeSpawnChance = 0.12;
+
+        // Which truck holds which parking slot, per zone: zoneId -> Map(truckId -> slot).
+        // Without this every truck drives to the same centre point and they
+        // stack on top of each other when stopped.
+        this.parkingSlots = new Map();
+        this.slotsPerZone = 8;
+    }
+
+    /**
+     * Claims a stable parking slot for a truck in a zone, releasing whatever it
+     * held elsewhere. Slots are handed out lowest-free-first, so a departing
+     * truck's spot is reused rather than leaving a gap.
+     * @returns {number} slot index
+     */
+    claimParkingSlot(truck, zoneId) {
+        this.releaseParkingSlot(truck);
+
+        if (!this.parkingSlots.has(zoneId)) this.parkingSlots.set(zoneId, new Map());
+        const held = this.parkingSlots.get(zoneId);
+
+        const taken = new Set(held.values());
+        let slot = 0;
+        while (taken.has(slot) && slot < this.slotsPerZone) slot++;
+
+        held.set(truck.id, slot);
+        truck.parkingSlot = slot;
+        truck.parkingZone = zoneId;
+        return slot;
+    }
+
+    releaseParkingSlot(truck) {
+        if (!truck.parkingZone) return;
+        const held = this.parkingSlots.get(truck.parkingZone);
+        if (held) held.delete(truck.id);
+        truck.parkingZone = null;
+        truck.parkingSlot = null;
+    }
+
+    /**
+     * Where a truck should physically stop in its target zone. Falls back to
+     * the zone centre for anything without a claimed slot.
+     * @returns {{lat:number,lng:number}|null}
+     */
+    parkingPointFor(truck, zoneId) {
+        if (truck.parkingZone === zoneId && truck.parkingSlot !== null && truck.parkingSlot !== undefined) {
+            return this.geoManager.getParkingSlot(zoneId, truck.parkingSlot, this.slotsPerZone);
+        }
+        return this.geoManager.getZoneCenter(zoneId);
     }
 
     spawnTruck(requestedType = null, options = {}) {
@@ -162,6 +212,8 @@ export class TruckManager {
             lng: spawnZone.lng + laneOffsetLng
         };
 
+        this.claimParkingSlot(truck, truck.targetZone);
+
         this.trucks.push(truck);
         console.log(`[TruckManager] Truck ${id} (${plate}) spawned at Genova Ovest. Mission: ${missionType}${truck.isOversize ? ' [FUORI SAGOMA]' : ''}.`);
         return truck;
@@ -201,6 +253,7 @@ export class TruckManager {
             truck.previousZone = truck.targetZone;
         }
         truck.targetZone = zone;
+        this.claimParkingSlot(truck, zone);
     }
 
     update(dt) {
@@ -323,6 +376,7 @@ export class TruckManager {
                 if (this._hasArrived(t, TruckRoute.DESPAWN)) {
                     {
                         t.status = TruckStatus.DEPARTED;
+                        this.releaseParkingSlot(t);
                         console.log(`[LifeCycle] Truck ${t.plate} despawned at Genova Ovest.`);
                     }
                 }

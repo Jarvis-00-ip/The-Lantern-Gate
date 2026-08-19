@@ -435,6 +435,105 @@ export class GeoManager {
         return this._isPointInPolygon(point, zone.vertices);
     }
 
+    /**
+     * A parking spot inside a zone, spread along its long axis.
+     *
+     * Vehicles used to all drive to the geometric centre, so they stacked on
+     * the same pixel when stopped. Slots are laid out between the zone's two
+     * farthest vertices — that follows the real orientation, which matters for
+     * the diagonal quays and lanes here, where a bounding-box axis would fall
+     * outside the polygon.
+     *
+     * @param {string} zoneId
+     * @param {number} slotIndex - 0-based.
+     * @param {number} slotCount - How many slots to divide the zone into.
+     * @returns {{lat:number,lng:number}|null}
+     */
+    getParkingSlot(zoneId, slotIndex = 0, slotCount = 8) {
+        const zone = this.zones.find(z => z.id === zoneId);
+        const centre = this.getZoneCenter(zoneId);
+        if (!zone || !zone.vertices || zone.vertices.length < 3 || !centre) return centre;
+
+        // Long axis = the most distant pair of vertices.
+        let a = zone.vertices[0], b = zone.vertices[1], best = -1;
+        for (let i = 0; i < zone.vertices.length; i++) {
+            for (let j = i + 1; j < zone.vertices.length; j++) {
+                const d = this._distanceMeters(zone.vertices[i], zone.vertices[j]);
+                if (d > best) { best = d; a = zone.vertices[i]; b = zone.vertices[j]; }
+            }
+        }
+
+        const count = Math.max(1, slotCount);
+        const idx = ((slotIndex % count) + count) % count;
+
+        // Keep off the ends so vehicles do not sit on the boundary.
+        const INSET = 0.18;
+        const t = INSET + ((idx + 0.5) / count) * (1 - 2 * INSET);
+
+        let p = { lat: a.lat + (b.lat - a.lat) * t, lng: a.lng + (b.lng - a.lng) * t };
+
+        // The long axis is a chord, so for concave or slanted shapes it can pass
+        // outside. Pull towards the centre until it is in.
+        for (let k = 0; k < 8 && !this._isPointInPolygon(p, zone.vertices); k++) {
+            p = { lat: (p.lat + centre.lat) / 2, lng: (p.lng + centre.lng) / 2 };
+        }
+
+        return p;
+    }
+
+    /**
+     * A tidy grid of parking spots filling a zone — for a depot holding dozens
+     * of vehicles, where a single line of slots would run off the end.
+     *
+     * Spots are laid out along the zone's two axes and filtered to those that
+     * actually fall inside the polygon, then returned ordered by distance to
+     * `exitToward` when given. That ordering is what lets the vehicles nearest
+     * the way out be dispatched first, instead of one at the back having to
+     * thread past everyone.
+     *
+     * @param {string} zoneId
+     * @param {number} wanted - How many spots are needed.
+     * @param {{lat:number,lng:number}|null} exitToward - Sort spots towards this.
+     * @returns {Array<{lat:number,lng:number}>}
+     */
+    getParkingGrid(zoneId, wanted = 10, exitToward = null) {
+        const zone = this.zones.find(z => z.id === zoneId);
+        if (!zone || !zone.vertices || zone.vertices.length < 3) return [];
+
+        let minLat = 90, maxLat = -90, minLng = 180, maxLng = -180;
+        zone.vertices.forEach(v => {
+            minLat = Math.min(minLat, v.lat); maxLat = Math.max(maxLat, v.lat);
+            minLng = Math.min(minLng, v.lng); maxLng = Math.max(maxLng, v.lng);
+        });
+
+        // Oversample: a good share of grid points land outside a non-rectangular
+        // polygon, so ask for more than needed and keep the ones that fit.
+        let cols = Math.ceil(Math.sqrt(wanted * 2.5));
+        let rows = cols;
+        let spots = [];
+
+        for (let attempt = 0; attempt < 4 && spots.length < wanted; attempt++) {
+            spots = [];
+            for (let r = 0; r < rows; r++) {
+                for (let c = 0; c < cols; c++) {
+                    const p = {
+                        lat: minLat + (maxLat - minLat) * ((r + 0.5) / rows),
+                        lng: minLng + (maxLng - minLng) * ((c + 0.5) / cols)
+                    };
+                    if (this._isPointInPolygon(p, zone.vertices)) spots.push(p);
+                }
+            }
+            if (spots.length < wanted) { cols += 3; rows += 3; }
+        }
+
+        if (exitToward) {
+            spots.sort((a, b) =>
+                this._distanceMeters(a, exitToward) - this._distanceMeters(b, exitToward));
+        }
+
+        return spots.slice(0, wanted);
+    }
+
     getZoneCenter(zoneId) {
         const zone = this.zones.find(z => z.id === zoneId);
         if (!zone || !zone.vertices) return null;

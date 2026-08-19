@@ -15,12 +15,38 @@ describe('FleetManager — posizionamento iniziale', () => {
         equal(senzaCoord.length, 0, 'alcuni mezzi restano senza lat/lng');
     });
 
-    it('parcheggia la flotta vicino al depot, non sparpagliata', () => {
+    it('parcheggia ogni mezzo dentro il depot', () => {
         const f = new FleetManager();
         f.seedInitialPositions(geo);
-        const depot = geo.getZoneCenter('DEPOT_RALLE');
-        const lontani = f.getVehicles().filter(v => geo._distanceMeters(v.position, depot) > 30);
-        equal(lontani.length, 0, 'mezzi troppo lontani dal depot: farebbero partire un pathfinding all\'avvio');
+        const fuori = f.getVehicles().filter(v => !geo.isInsideZone(v.position, 'DEPOT_RALLE'));
+        equal(fuori.length, 0, 'ci sono mezzi parcheggiati fuori dal depot');
+    });
+
+    it('dispone i mezzi in posti distinti, senza sovrapposizioni', () => {
+        const f = new FleetManager();
+        f.seedInitialPositions(geo);
+        const v = f.getVehicles();
+        let minimo = Infinity;
+        for (let i = 0; i < v.length; i++) {
+            for (let j = i + 1; j < v.length; j++) {
+                minimo = Math.min(minimo, geo._distanceMeters(v[i].position, v[j].position));
+            }
+        }
+        assert(minimo > 3, `due mezzi praticamente sovrapposti (${Math.round(minimo)}m)`);
+    });
+
+    it('numera la coda dall\'uscita verso il fondo', () => {
+        const f = new FleetManager();
+        f.seedInitialPositions(geo);
+        const uscita = geo.getZoneCenter('WAITING_CAMION');
+        const v = f.getVehicles();
+
+        equal(v[0].depotSlot, 0, 'il primo mezzo non è in testa alla coda');
+        // Chi ha lo slot più basso deve stare più vicino all'uscita: è la
+        // condizione perché i primi a partire non debbano scavalcare gli altri.
+        assert(geo._distanceMeters(v[0].position, uscita) <
+            geo._distanceMeters(v[v.length - 1].position, uscita),
+            'la coda non è ordinata verso l\'uscita');
     });
 });
 

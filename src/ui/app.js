@@ -15,6 +15,7 @@ import { StorageManager, StorageKeys } from '../core/StorageManager.js';
 import { renderBuildStamp } from '../core/version.js';
 import { RouteBook } from '../core/RouteBook.js';
 import { RouteEditor } from './RouteEditor.js';
+import { truckIcon, fleetIcon, bearing } from './vehicleIcons.js';
 
 // Stamp the build into the header before anything else can fail, so a stale
 // cached page is always distinguishable from a fresh deploy.
@@ -781,40 +782,26 @@ try {
     // Vehicle Markers Cache: { vehicleId: Marker }
     const vehicleMarkers = {};
 
-    const getVehicleIcon = (type, hasContainer) => {
-        const color = type === 'Ralla' ? '#e3b341' : '#f78166';
+    const getVehicleIcon = (type, hasContainer, heading = 0) => {
+        return L.divIcon({
+            className: 'vehicle-marker',
+            html: fleetIcon(type, { loaded: hasContainer, heading }),
+            iconSize: [26, 26],
+            iconAnchor: [13, 13]
+        });
+    };
 
-        let containerHtml = '';
-        if (hasContainer) {
-            // Draw a small 20ft container on top
-            containerHtml = `
-                <div style="
-                    position: absolute;
-                    top: -6px; left: -4px;
-                    width: 20px; height: 10px;
-                    background: linear-gradient(45deg, #1f6feb, #58a6ff);
-                    border: 1px solid #0d1117;
-                    border-radius: 2px;
-                    box-shadow: 1px 1px 2px rgba(0,0,0,0.5);
-                    z-index: 10;
-                "></div>
-            `;
-        }
-
-        const iconHtml = `
-            <div style="position: relative;">
-                <div style="
-                    background-color: ${color}; 
-                    width: 12px; height: 12px; 
-                    border-radius: 50%; 
-                    border: 2px solid white; 
-                    box-shadow: 0 0 4px rgba(0,0,0,0.5); 
-                    transition: all 0.3s ease;
-                "></div>
-                ${containerHtml}
-            </div>
-        `;
-        return L.divIcon({ className: 'vehicle-marker', html: iconHtml, iconSize: [16, 16], iconAnchor: [8, 8] });
+    /**
+     * Points an existing marker's artwork along its direction of travel by
+     * touching the wrapper's transform, rather than rebuilding the icon — which
+     * would recreate DOM on every animation frame.
+     */
+    const setMarkerHeading = (marker, deg) => {
+        if (marker._heading === deg) return;
+        marker._heading = deg;
+        const el = marker.getElement && marker.getElement();
+        const rot = el && el.querySelector('.veh-rot');
+        if (rot) rot.style.transform = `rotate(${deg}deg)`;
     };
 
     const renderVehicles = () => {
@@ -917,9 +904,9 @@ try {
                 // Update Icon if Container State Changed
                 const hasContainer = !!v.carriedContainer;
                 if (marker.hasContainer !== hasContainer) {
-                    const newIcon = getVehicleIcon(v.type, hasContainer);
-                    marker.setIcon(newIcon);
+                    marker.setIcon(getVehicleIcon(v.type, hasContainer, marker._heading || 0));
                     marker.hasContainer = hasContainer;
+                    marker._heading = null; // force the next move to re-apply rotation
                 }
 
                 if (marker.isFollowingPath && !destChanged) return;
@@ -927,19 +914,27 @@ try {
                 // MOVEMENT LOGIC: Converge to Target Zone
                 // If we have a target zone, and we are not moving, check distance.
                 if (v.currentZone && !marker.isFollowingPath) {
-                    const targetZoneCenter = geoManager.getZoneCenter(v.currentZone);
-                    if (targetZoneCenter) {
-                        const currentPos = marker.getLatLng();
-                        const dist = map.distance(currentPos, [targetZoneCenter.lat, targetZoneCenter.lng]);
+                    // Head for this vehicle's own spot when that is where it
+                    // belongs, otherwise the middle of the target zone.
+                    const inDepot = v.currentZone === 'DEPOT_RALLE' && v.homeSpot;
+                    const goal = inDepot ? v.homeSpot : geoManager.getZoneCenter(v.currentZone);
 
-                        // If we are far (>30m) from where we should be, MOVE.
-                        if (dist > 30) {
-                            console.log(`[Fleet] Vehicle ${v.id} is ${Math.round(dist)}m from ${v.currentZone}. Moving...`);
-                            marker.destinationLatLng = L.latLng(targetZoneCenter.lat, targetZoneCenter.lng);
+                    if (goal) {
+                        const currentPos = marker.getLatLng();
+                        const dist = map.distance(currentPos, [goal.lat, goal.lng]);
+
+                        // Same trap the trucks fell into: measuring only against
+                        // the zone centre would order every parked machine to
+                        // drive to the centroid, collapsing the tidy depot grid
+                        // into a pile on the first frame. Being in the right
+                        // place counts as being there.
+                        const settled = dist < 12 || (!inDepot && geoManager.isInsideZone(
+                            { lat: currentPos.lat, lng: currentPos.lng }, v.currentZone));
+
+                        if (!settled) {
+                            console.log(`[Fleet] Vehicle ${v.id} is ${Math.round(dist)}m from its spot in ${v.currentZone}. Moving...`);
+                            marker.destinationLatLng = L.latLng(goal.lat, goal.lng);
                             executeMove(marker, currentPos, marker.destinationLatLng, v);
-                        } else {
-                            // We are there.
-                            // Ensure sync? 
                         }
                     }
                 }
@@ -1033,6 +1028,25 @@ try {
 
     // --- Animation Helpers ---
 
+    /**
+     * The part of a drawn route still ahead of `from`.
+     *
+     * A route is re-issued whenever a truck is told to move again, and taking
+     * the line from index 0 each time would drag it back to the start of the
+     * leg. Snapping to the closest point and continuing from there keeps
+     * progress.
+     * @returns {Array|null} Remaining points, or null when already at the end.
+     */
+    const remainingRoute = (route, from) => {
+        let bestIdx = 0, bestDist = Infinity;
+        for (let i = 0; i < route.length; i++) {
+            const d = map.distance([from.lat, from.lng], [route[i].lat, route[i].lng]);
+            if (d < bestDist) { bestDist = d; bestIdx = i; }
+        }
+        const rest = route.slice(bestIdx + 1);
+        return rest.length > 0 ? rest : null;
+    };
+
     const animatePath = (marker, pathPoints, speedMps) => {
         // pathPoints is array of {lat, lng}
         let currentStep = 0;
@@ -1089,6 +1103,12 @@ try {
 
     const animateMarker = (marker, startLatLng, endLatLng, duration, onComplete) => {
         const startTime = performance.now();
+
+        // Face the way we are going, so the silhouettes read as vehicles
+        // instead of drifting sideways.
+        setMarkerHeading(marker, Math.round(bearing(
+            { lat: startLatLng.lat, lng: startLatLng.lng },
+            { lat: endLatLng.lat, lng: endLatLng.lng })));
 
         const animate = (currentTime) => {
             if (!marker._map) return;
@@ -1196,11 +1216,12 @@ try {
             // Create if missing
             if (!marker) {
                 // Default Icon
-                // Out-of-gauge loads get their own colour so it is obvious why
-                // they head for a different gate.
-                const baseColor = t.isOversize ? '#e3b341' : '#4caf50';
-                const iconHtml = `<div style="background: ${baseColor}; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>`;
-                const icon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [16, 16] });
+                const icon = L.divIcon({
+                    className: 'truck-marker',
+                    html: truckIcon({ loaded: !!t.containerId, oversize: t.isOversize }),
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                });
                 marker = L.marker([t.position.lat, t.position.lng], { icon: icon }).addTo(map);
                 marker.bindPopup(`<b>${t.id}</b><br>${t.plate}<br>${t.status}`);
                 marker.truckId = t.id;
@@ -1213,29 +1234,14 @@ try {
             // For simplicity, we construct HTML every frame or check a flag. 
             // Let's check flag.
             if (marker.hasContainer !== hasContainer) {
-                let containerHtml = '';
-                if (hasContainer) {
-                    containerHtml = `
-                        <div style="
-                            position: absolute;
-                            top: -6px; left: -3px;
-                            width: 20px; height: 10px;
-                            background: linear-gradient(45deg, #FF5722, #FF9800); /* Orange for Truck Export/Import */
-                            border: 1px solid #333;
-                            border-radius: 2px;
-                            z-index: 10;
-                        "></div>`;
-                }
-                const baseColor = t.isOversize ? '#e3b341' : '#4caf50';
-                const iconHtml = `
-                    <div style="position: relative;">
-                        <div style="background: ${baseColor}; width: 14px; height: 14px; border: 2px solid white; border-radius: 2px; box-shadow: 1px 1px 3px black;"></div>
-                        ${containerHtml}
-                    </div>`;
-
-                const newIcon = L.divIcon({ className: 'truck-marker', html: iconHtml, iconSize: [16, 16], iconAnchor: [8, 8] });
-                marker.setIcon(newIcon);
+                marker.setIcon(L.divIcon({
+                    className: 'truck-marker',
+                    html: truckIcon({ loaded: hasContainer, oversize: t.isOversize, heading: marker._heading || 0 }),
+                    iconSize: [30, 30],
+                    iconAnchor: [15, 15]
+                }));
                 marker.hasContainer = hasContainer;
+                marker._heading = null; // force the next move to re-apply rotation
             }
 
             // Determine Status Label
@@ -1253,40 +1259,48 @@ try {
             }
 
             // MOVEMENT LOGIC
-            // We need to move the truck towards its target zone center.
+            // Drive towards this truck's own parking spot in the target zone.
             if (t.targetZone && !marker.isFollowingPath) {
-                const targetCenter = geoManager.getZoneCenter(t.targetZone);
-                if (targetCenter) {
+                const stop = truckManager.parkingPointFor(t, t.targetZone);
+                if (stop) {
                     const currentLatLng = marker.getLatLng();
-                    const dist = map.distance(currentLatLng, [targetCenter.lat, targetCenter.lng]);
+                    const dist = map.distance(currentLatLng, [stop.lat, stop.lng]);
 
-                    if (dist > 4) {
+                    // Parked means parked. The movement trigger has to agree with
+                    // the arrival test in TruckManager: when it only compared with
+                    // the zone centre, a truck stopped 40m up a 127m-long yard was
+                    // "arrived" yet still counted as needing to move — and got
+                    // handed the whole drawn leg again, driving it back to the gate
+                    // and round in circles.
+                    const parked = dist < 6 || geoManager.isInsideZone(
+                        { lat: currentLatLng.lat, lng: currentLatLng.lng }, t.targetZone);
+
+                    if (!parked) {
                         const start = { lat: currentLatLng.lat, lng: currentLatLng.lng };
 
                         // A hand-drawn route for this leg wins over automatic
                         // routing: the operator knows the site, OSM data does not.
                         const drawn = routeBook.get(t.previousZone, t.targetZone);
-                        const path = drawn || pathFinder.findPath(start, t.targetZone);
-                        if (drawn) marker.usingDrawnRoute = true;
+                        // Resume from the nearest point onwards — never rewind to
+                        // the start of a leg already partly driven.
+                        const path = drawn ? remainingRoute(drawn, start) : pathFinder.findPath(start, t.targetZone);
 
                         if (path && path.length > 0) {
-                            // A drawn route ends where trucks actually stop. Only
-                            // append the zone centre when the path does not already
-                            // reach inside the zone, otherwise we would drag the
-                            // truck off the drawn line towards the centroid.
+                            // A drawn route ends where trucks actually stop, so only
+                            // append the parking spot when the line does not already
+                            // reach into the zone.
                             const last = path[path.length - 1];
                             const reachesZone = drawn && geoManager.isInsideZone(last, t.targetZone);
                             const fullPath = reachesZone
                                 ? [start, ...path]
-                                : [start, ...path, { lat: targetCenter.lat, lng: targetCenter.lng }];
+                                : [start, ...path, { lat: stop.lat, lng: stop.lng }];
                             marker.isFollowingPath = true;
-                            // Use generic animatePath helper
-                            // SPEED UPDATE: 70 km/h ~= 19.44 m/s
+                            // SPEED: 70 km/h ~= 19.44 m/s
                             animatePath(marker, fullPath, 19.44);
                         } else {
                             // Fallback Linear
                             marker.isFollowingPath = true;
-                            animateMarker(marker, currentLatLng, L.latLng(targetCenter.lat, targetCenter.lng), (dist / 19.44) * 1000, () => {
+                            animateMarker(marker, currentLatLng, L.latLng(stop.lat, stop.lng), (dist / 19.44) * 1000, () => {
                                 marker.isFollowingPath = false;
                             });
                         }

@@ -19,6 +19,8 @@ export class Vehicle {
         this.deployedZone = 'DEPOT_RALLE'; // Home base for return
         this.assignedBlock = null; // e.g., 'BLOCK_A'
         this.position = { x: 0, y: 0, rotation: 0 };
+        this.depotSlot = null; // Queue position in the depot; 0 = nearest the exit
+        this.homeSpot = null;  // Its own parking spot, so recalls stay tidy
     }
 }
 
@@ -47,21 +49,23 @@ export class FleetManager {
      * @param {Object} geoManager - Instance of GeoManager
      */
     seedInitialPositions(geoManager) {
-        const depotCenter = geoManager.getZoneCenter('DEPOT_RALLE');
-        if (!depotCenter) return;
-        this.vehicles.forEach(v => {
-            // Small jitter (~±10m) around the depot centre so the fleet spreads
-            // out visually but stays close enough that the renderer treats it as
-            // "parked" instead of triggering a convergence move on load.
-            const jitterLat = (Math.random() - 0.5) * 0.00018; // ~±10m
-            const jitterLng = (Math.random() - 0.5) * 0.00025; // ~±10m
-            v.position = {
-                lat: depotCenter.lat + jitterLat,
-                lng: depotCenter.lng + jitterLng,
-                rotation: Math.random() * 360
-            };
+        const depotCentre = geoManager.getZoneCenter('DEPOT_RALLE');
+        if (!depotCentre) return;
+
+        // Park in a tidy grid rather than a random scatter, ordered so the spot
+        // nearest the way out is slot 0. Dispatch then works from the front,
+        // which is how a real depot empties — the machine at the back does not
+        // thread past everyone else to take the first job.
+        const exitToward = geoManager.getZoneCenter('WAITING_CAMION') || depotCentre;
+        const spots = geoManager.getParkingGrid('DEPOT_RALLE', this.vehicles.length, exitToward);
+
+        this.vehicles.forEach((v, i) => {
+            const spot = spots[i] || depotCentre;
+            v.position = { lat: spot.lat, lng: spot.lng, rotation: 0 };
             v.currentZone = 'DEPOT_RALLE';
             v.deployedZone = 'DEPOT_RALLE';
+            v.depotSlot = i;          // 0 = closest to the exit
+            v.homeSpot = { lat: spot.lat, lng: spot.lng };
         });
     }
 
@@ -189,9 +193,18 @@ export class FleetManager {
                 else return;
             }
 
-            const dist = geoManager._distanceMeters(startPos, targetPos);
-            if (dist < minTime) {
-                minTime = dist;
+            // Vehicles waiting in the depot are all roughly the same distance
+            // from a job across the terminal, so distance alone picks one at
+            // random. A small per-slot penalty breaks that tie in favour of the
+            // ones parked nearest the exit, without ever overriding a machine
+            // that is genuinely much closer to the work.
+            const queuePenalty = (v.currentZone === 'DEPOT_RALLE' && typeof v.depotSlot === 'number')
+                ? v.depotSlot * 3
+                : 0;
+
+            const score = geoManager._distanceMeters(startPos, targetPos) + queuePenalty;
+            if (score < minTime) {
+                minTime = score;
                 nearest = v;
             }
         });
@@ -206,11 +219,11 @@ export class FleetManager {
             v.currentZone = 'DEPOT_RALLE';
             v.assignedBlock = null;
             v.currentJobId = null;
-            // Send it back to a real point in the depot instead of {x:0,y:0},
-            // otherwise the renderer drops the marker and the vehicle vanishes.
-            const spot = geoManager
+            // Back to its own numbered spot, so the depot stays tidy across
+            // deploy/recall cycles instead of degrading into a scatter.
+            const spot = v.homeSpot || (geoManager
                 ? (geoManager.getRandomPointInZone('DEPOT_RALLE') || geoManager.getZoneCenter('DEPOT_RALLE'))
-                : null;
+                : null);
             v.position = spot
                 ? { lat: spot.lat, lng: spot.lng, rotation: 0 }
                 : { x: 0, y: 0, rotation: 0 };
