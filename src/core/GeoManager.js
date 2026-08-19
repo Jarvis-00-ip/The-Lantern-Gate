@@ -534,6 +534,24 @@ export class GeoManager {
         return spots.slice(0, wanted);
     }
 
+    /**
+     * Whether a position counts as having reached a zone: inside its polygon,
+     * or within `radius` of the centre as a fallback. This is the single
+     * source of truth for "arrived" — TruckManager and JobManager each used
+     * to check this independently, and JobManager's own copy compared only
+     * to the centre, which broke the moment vehicles started parking in slots
+     * spread across a zone (WAITING_CAMION is ~127m long): a machine properly
+     * parked 40-60m off-centre read as arrived to the eye and stuck forever
+     * in the code. One implementation now, so that class of bug can only
+     * happen once.
+     */
+    hasArrived(pos, zoneId, radius = 20) {
+        if (!pos || !zoneId) return false;
+        if (this.isInsideZone(pos, zoneId)) return true;
+        const centre = this.getZoneCenter(zoneId);
+        return !!centre && this._distanceMeters(pos, centre) < radius;
+    }
+
     getZoneCenter(zoneId) {
         const zone = this.zones.find(z => z.id === zoneId);
         if (!zone || !zone.vertices) return null;

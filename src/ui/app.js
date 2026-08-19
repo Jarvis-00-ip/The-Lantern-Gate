@@ -9,6 +9,7 @@ import { ROAD_NETWORK } from '../core/RoadNetworkData.js';
 import { VesselManager } from '../core/VesselManager.js';
 import { JobManager } from '../core/JobManager.js';
 import { TruckManager, TRUCK_LEGS } from '../core/TruckManager.js';
+import { TranstainerManager } from '../core/TranstainerManager.js';
 import { MainMenu } from './MainMenu.js';
 import { TOSDashboard } from './TOSDashboard.js';
 import { StorageManager, StorageKeys } from '../core/StorageManager.js';
@@ -37,6 +38,7 @@ try {
     const vesselManager = new VesselManager();
     const jobManager = new JobManager(fleetManager, yard, geoManager);
     const truckManager = new TruckManager(geoManager, jobManager, yard);
+    const transtainerManager = new TranstainerManager(geoManager, fleetManager, yard);
     const storage = new StorageManager();
 
     // Place the fleet on the map (parked in the depot). Without this every
@@ -50,6 +52,7 @@ try {
     window.vesselManager = vesselManager;
     window.jobManager = jobManager;
     window.truckManager = truckManager;
+    window.transtainer = transtainerManager;
     window.geo = geoManager;
 
     // ...
@@ -807,6 +810,19 @@ try {
     const renderVehicles = () => {
         const vehicles = fleetManager.getVehicles();
 
+        // Which vehicles currently share a destination outside the depot (the
+        // depot already has its own numbered slots via homeSpot). Dispatching
+        // reach stackers as soon as a truck clears OCR means several of them
+        // can end up heading to WAITING_CAMION at once — without this they
+        // would all converge on that zone's single centre point and stack up,
+        // the exact bug already fixed for trucks.
+        const zoneOccupants = new Map(); // zoneId -> [vehicleId, ...]
+        vehicles.forEach(v => {
+            if (!v.currentZone || v.currentZone === 'DEPOT_RALLE') return;
+            if (!zoneOccupants.has(v.currentZone)) zoneOccupants.set(v.currentZone, []);
+            zoneOccupants.get(v.currentZone).push(v.id);
+        });
+
         // Helper to execute movement (Pathfinding -> Animation)
         const executeMove = (marker, startLatLng, targetLatLng, vehicle) => {
             const startObj = { lat: startLatLng.lat, lng: startLatLng.lng };
@@ -914,21 +930,31 @@ try {
                 // MOVEMENT LOGIC: Converge to Target Zone
                 // If we have a target zone, and we are not moving, check distance.
                 if (v.currentZone && !marker.isFollowingPath) {
-                    // Head for this vehicle's own spot when that is where it
-                    // belongs, otherwise the middle of the target zone.
                     const inDepot = v.currentZone === 'DEPOT_RALLE' && v.homeSpot;
-                    const goal = inDepot ? v.homeSpot : geoManager.getZoneCenter(v.currentZone);
+                    const occupants = zoneOccupants.get(v.currentZone);
+                    const sharesZone = !inDepot && occupants && occupants.length > 1;
+
+                    // Depot: the vehicle's own numbered spot. Shared zone: a slot
+                    // of its own among the others heading there. Otherwise: the
+                    // zone's centre, same as before.
+                    const goal = inDepot
+                        ? v.homeSpot
+                        : sharesZone
+                            ? geoManager.getParkingSlot(v.currentZone, occupants.indexOf(v.id), occupants.length)
+                            : geoManager.getZoneCenter(v.currentZone);
 
                     if (goal) {
                         const currentPos = marker.getLatLng();
                         const dist = map.distance(currentPos, [goal.lat, goal.lng]);
 
                         // Same trap the trucks fell into: measuring only against
-                        // the zone centre would order every parked machine to
-                        // drive to the centroid, collapsing the tidy depot grid
-                        // into a pile on the first frame. Being in the right
-                        // place counts as being there.
-                        const settled = dist < 12 || (!inDepot && geoManager.isInsideZone(
+                        // the zone centre (or, for a shared zone, only checking
+                        // "somewhere inside") would let several machines settle
+                        // on top of each other before reaching their own slot.
+                        // Being in the right SPOT counts as being there; being
+                        // merely inside the zone only counts when nobody else is
+                        // competing for the same space.
+                        const settled = dist < 12 || (!inDepot && !sharesZone && geoManager.isInsideZone(
                             { lat: currentPos.lat, lng: currentPos.lng }, v.currentZone));
 
                         if (!settled) {
@@ -1286,12 +1312,17 @@ try {
                         const path = drawn ? remainingRoute(drawn, start) : pathFinder.findPath(start, t.targetZone);
 
                         if (path && path.length > 0) {
-                            // A drawn route ends where trucks actually stop, so only
-                            // append the parking spot when the line does not already
-                            // reach into the zone.
+                            // A drawn route ends at ONE fixed point, shared by every
+                            // truck taking that leg. Stopping there unconditionally
+                            // was the overlap bug: every truck converged on that exact
+                            // pixel instead of its own slot. Only skip the final docking
+                            // stretch when the drawn line already happens to end near
+                            // THIS truck's own slot; otherwise finish the trip there.
                             const last = path[path.length - 1];
-                            const reachesZone = drawn && geoManager.isInsideZone(last, t.targetZone);
-                            const fullPath = reachesZone
+                            const NEAR_OWN_SLOT = 15;
+                            const alreadyAtSlot = drawn &&
+                                map.distance([last.lat, last.lng], [stop.lat, stop.lng]) < NEAR_OWN_SLOT;
+                            const fullPath = alreadyAtSlot
                                 ? [start, ...path]
                                 : [start, ...path, { lat: stop.lat, lng: stop.lng }];
                             marker.isFollowingPath = true;
@@ -1377,6 +1408,7 @@ try {
         // Updates
         if (truckManager) truckManager.update(dt);
         if (jobManager) jobManager.update(dt);
+        if (transtainerManager) transtainerManager.update(dt);
 
         // Renders
         renderTrucks();
