@@ -552,6 +552,20 @@ export class GeoManager {
         return !!centre && this._distanceMeters(pos, centre) < radius;
     }
 
+    /**
+     * Compass bearing (degrees clockwise from north) from one point to
+     * another. Canonical implementation for anything in core/ that needs to
+     * orient itself (e.g. a vessel sailing towards a berth) — vehicleIcons.js
+     * has its own copy for the UI layer, since core/ must not import from ui/.
+     */
+    bearing(from, to) {
+        const toRad = d => d * Math.PI / 180;
+        const y = Math.sin(toRad(to.lng - from.lng)) * Math.cos(toRad(to.lat));
+        const x = Math.cos(toRad(from.lat)) * Math.sin(toRad(to.lat)) -
+            Math.sin(toRad(from.lat)) * Math.cos(toRad(to.lat)) * Math.cos(toRad(to.lng - from.lng));
+        return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+    }
+
     getZoneCenter(zoneId) {
         const zone = this.zones.find(z => z.id === zoneId);
         if (!zone || !zone.vertices) return null;

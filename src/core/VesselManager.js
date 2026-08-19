@@ -4,12 +4,17 @@ export class VesselCall {
         this.name = name;
         this.eta = eta; // Date object
         this.etd = etd; // Date object (Deadline)
-        this.status = 'INBOUND'; // INBOUND, BERTHED, COMPLETED, DEPARTED
+        // INBOUND (scheduled, not yet sailing) -> APPROACHING (sailing to its
+        // berth) -> BERTHED (working the manifest) -> DEPARTING (sailing out)
+        // -> DEPARTED. The physical states are driven by VesselOpsManager;
+        // this class only holds the data.
+        this.status = 'INBOUND';
         this.manifest = {
             discharge: [], // List of Container IDs to unload
             load: []       // List of Container IDs to load
         };
         this.penaltyPerHour = 1000; // Mock currency
+        this.position = null; // {lat, lng, rotation} — set once it starts sailing in
     }
 
     addManifestItem(type, containerId) {
@@ -20,6 +25,8 @@ export class VesselCall {
         }
     }
 }
+
+let vesselCounter = 0;
 
 export class VesselManager {
     constructor() {
@@ -32,7 +39,11 @@ export class VesselManager {
         const eta = new Date(now.getTime() + etaSeconds * 1000);
         const etd = new Date(eta.getTime() + durationSeconds * 1000);
 
-        const id = `VSL-${Date.now()}`;
+        // Date.now() alone collides when two vessels are scheduled inside the
+        // same millisecond (a real risk: two quick clicks on the menu, or a
+        // tight test loop) — every other id-generating manager in this
+        // codebase (TranstainerManager's jobCounter) already learned this.
+        const id = `VSL-${Date.now()}-${vesselCounter++}`;
         const vessel = new VesselCall(id, name, eta, etd);
 
         this.vessels.push(vessel);
@@ -43,7 +54,10 @@ export class VesselManager {
 
     berthVessel(vesselId) {
         const v = this.vessels.find(x => x.id === vesselId);
-        if (v && v.status === 'INBOUND') {
+        // APPROACHING covers the normal path (VesselOpsManager moves it to its
+        // berth first); INBOUND is kept for callers that berth directly
+        // without a physical sailing-in phase.
+        if (v && (v.status === 'INBOUND' || v.status === 'APPROACHING')) {
             v.status = 'BERTHED';
             this.activeVessel = v;
             console.log(`[VesselManager] ${v.name} is now Berthed.`);

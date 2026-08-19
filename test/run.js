@@ -17,6 +17,7 @@ await import('./defaultroutes.test.js');
 await import('./parking.test.js');
 await import('./dispatch.test.js');
 await import('./transtainer.test.js');
+await import('./vesselOps.test.js');
 
 const failed = await run();
 process.exit(failed > 0 ? 1 : 0);
