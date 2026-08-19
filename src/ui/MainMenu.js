@@ -57,7 +57,8 @@ export class MainMenu {
             { id: 'sim_trk_oog', label: '📐 Spawn Truck (Fuori Sagoma)', action: () => window.truckManager && window.truckManager.spawnTruck(null, { oversize: true }) },
             { isDivider: true },
             { id: 'sim_rtg_exp', label: '🏗️ Transtainer: Export', action: () => window.transtainer && window.transtainer.requestExport() },
-            { id: 'sim_rtg_imp', label: '📥 Transtainer: Import', action: () => window.transtainer && window.transtainer.requestImport() }
+            { id: 'sim_rtg_imp', label: '📥 Transtainer: Import', action: () => window.transtainer && window.transtainer.requestImport() },
+            { id: 'sim_vessel_arrival', label: '🚢 Nave: Arrivo', action: () => window.vesselOps && window.vesselOps.requestArrival() }
         ];
 
         items.forEach(item => {

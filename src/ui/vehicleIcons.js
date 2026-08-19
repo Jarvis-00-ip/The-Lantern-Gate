@@ -24,8 +24,8 @@ function deck(x, y, w, h, loaded, cargoColour) {
                fill="none" stroke="#8b949e" stroke-width="0.8" stroke-dasharray="2,1.5"/>`;
 }
 
-function wrap(svg, size, heading = 0) {
-    return `<div class="veh-rot" style="width:${size}px;height:${size}px;
+function wrap(svg, width, heading = 0, height = width) {
+    return `<div class="veh-rot" style="width:${width}px;height:${height}px;
                  transform:rotate(${heading}deg);transform-origin:50% 50%;
                  transition:transform .25s linear;">${svg}</div>`;
 }
@@ -102,6 +102,37 @@ export function reachStackerIcon({ loaded = false, heading = 0, cargo = 'standar
     </svg>`;
 
     return wrap(svg, 26, heading);
+}
+
+const PHASE_COLOUR = { APPROACHING: '#8b949e', BERTHED: '#3fb950', DEPARTING: '#1f6feb' };
+
+/**
+ * Container ship, plan view, bow pointing up (0deg = north). Hull outline
+ * colour reflects its phase (grey while sailing in, green once berthed and
+ * working, blue while sailing back out) so its state reads at a glance
+ * without needing to open a popup.
+ * @param {Object} o
+ * @param {number} o.heading - Degrees clockwise from north.
+ * @param {string} o.phase - One of VesselOpStatus (APPROACHING/BERTHED/DEPARTING).
+ */
+export function vesselIcon({ heading = 0, phase = 'APPROACHING' } = {}) {
+    const ringColour = PHASE_COLOUR[phase] || PHASE_COLOUR.APPROACHING;
+    const cargoOrder = ['standard', 'reefer', 'standard', 'imo'];
+
+    const svg = `
+    <svg viewBox="0 0 40 100" width="40" height="100" style="overflow:visible;">
+      <!-- hull -->
+      <path d="M 20 2 L 34 22 L 34 88 Q 34 96 27 96 L 13 96 Q 6 96 6 88 L 6 22 Z"
+            fill="#30363d" stroke="${ringColour}" stroke-width="2.2"/>
+      <!-- bridge -->
+      <rect x="12" y="74" width="16" height="18" rx="2" fill="#484f58" stroke="#0d1117" stroke-width="1"/>
+      <!-- container stacks on deck -->
+      ${cargoOrder.map((cargo, i) => `
+        <rect x="10" y="${18 + i * 13}" width="20" height="10" rx="1"
+              fill="${CONTAINER_FILL[cargo]}" stroke="#0d1117" stroke-width="0.8"/>`).join('')}
+    </svg>`;
+
+    return wrap(svg, 40, heading, 100);
 }
 
 /** Picks the right silhouette for a fleet vehicle type. */

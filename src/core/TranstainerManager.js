@@ -46,13 +46,22 @@ export const TranstainerPhase = {
     COMPLETED: 'COMPLETED'
 };
 
-/** The two RTGs. Each dock is a real LOADING zone, not synthetic geometry. */
+/**
+ * The four RTGs. Only two crane-rail corridors exist in the traced geometry
+ * (LOADING_BC_CRANES, LOADING_AC_CRANES — real polygons, not invented), so
+ * two units share each corridor, at distinct fixed points along it (see
+ * `slot`/`slotCount`, resolved to real positions in the constructor via
+ * GeoManager.getParkingSlot). _nearestUnit() round-robins between the two
+ * units on whichever corridor is nearest, so both actually get used.
+ */
 export const TRANSTAINER_UNITS = [
-    { id: 'RTG-BC', dockZone: 'LOADING_BC_CRANES', craneZone: 'BLOCK_BC_CRANES' },
-    { id: 'RTG-AC', dockZone: 'LOADING_AC_CRANES', craneZone: 'BLOCK_AC_CRANES' }
+    { id: 'RTG-BC-1', dockZone: 'LOADING_BC_CRANES', craneZone: 'BLOCK_BC_CRANES', slot: 0, slotCount: 2 },
+    { id: 'RTG-BC-2', dockZone: 'LOADING_BC_CRANES', craneZone: 'BLOCK_BC_CRANES', slot: 1, slotCount: 2 },
+    { id: 'RTG-AC-1', dockZone: 'LOADING_AC_CRANES', craneZone: 'BLOCK_AC_CRANES', slot: 0, slotCount: 2 },
+    { id: 'RTG-AC-2', dockZone: 'LOADING_AC_CRANES', craneZone: 'BLOCK_AC_CRANES', slot: 1, slotCount: 2 }
 ];
 
-const YARD_BLOCKS = ['BLOCK_A', 'BLOCK_B', 'BLOCK_C', 'BLOCK_D'];
+export const YARD_BLOCKS = ['BLOCK_A', 'BLOCK_B', 'BLOCK_C', 'BLOCK_D'];
 
 let jobCounter = 0;
 
@@ -78,8 +87,17 @@ export class TranstainerManager {
         this.fleetManager = fleetManager;
         this.yardManager = yardManager;
 
-        this.units = TRANSTAINER_UNITS.map(u => ({ ...u, exportedCount: 0, importedCount: 0 }));
+        this.units = TRANSTAINER_UNITS.map(u => ({
+            ...u,
+            exportedCount: 0,
+            importedCount: 0,
+            // Fixed map position for this specific crane, spread along its
+            // corridor's long axis — this is what makes two units sharing a
+            // dockZone render at two different spots instead of stacking.
+            position: geoManager.getParkingSlot(u.dockZone, u.slot, u.slotCount)
+        }));
         this.jobs = [];
+        this._roundRobin = {}; // dockZone -> next unit index, for _nearestUnit
 
         // Timings, in one place and overridable, same pattern as
         // TruckManager's *ProcessingTimeMs — tests shrink these to run fast.
@@ -387,12 +405,23 @@ export class TranstainerManager {
         return null;
     }
 
-    /** Which unit sits closer to a given zone. */
+    /**
+     * Picks a unit for a job near `zoneId`. Distance decides which corridor
+     * (dockZone) is nearest; when more than one unit shares that corridor,
+     * round-robins between them so both are actually put to work instead of
+     * one twin always losing a tie-break on identical dockZone distance.
+     */
     _nearestUnit(zoneId) {
         const pos = this.geoManager.getZoneCenter(zoneId);
-        return this.units.reduce((best, u) => {
-            const d = this.geoManager._distanceMeters(pos, this.geoManager.getZoneCenter(u.dockZone));
-            return (!best || d < best.d) ? { unit: u, d } : best;
-        }, null).unit;
+        const dockZones = [...new Set(this.units.map(u => u.dockZone))];
+        const nearestDock = dockZones.reduce((best, dz) => {
+            const d = this.geoManager._distanceMeters(pos, this.geoManager.getZoneCenter(dz));
+            return (!best || d < best.d) ? { dz, d } : best;
+        }, null).dz;
+
+        const candidates = this.units.filter(u => u.dockZone === nearestDock);
+        const i = (this._roundRobin[nearestDock] || 0) % candidates.length;
+        this._roundRobin[nearestDock] = i + 1;
+        return candidates[i];
     }
 }

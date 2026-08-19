@@ -10,13 +10,14 @@ import { VesselManager } from '../core/VesselManager.js';
 import { JobManager } from '../core/JobManager.js';
 import { TruckManager, TRUCK_LEGS } from '../core/TruckManager.js';
 import { TranstainerManager } from '../core/TranstainerManager.js';
+import { VesselOpsManager } from '../core/VesselOpsManager.js';
 import { MainMenu } from './MainMenu.js';
 import { TOSDashboard } from './TOSDashboard.js';
 import { StorageManager, StorageKeys } from '../core/StorageManager.js';
 import { renderBuildStamp } from '../core/version.js';
 import { RouteBook } from '../core/RouteBook.js';
 import { RouteEditor } from './RouteEditor.js';
-import { truckIcon, fleetIcon, bearing } from './vehicleIcons.js';
+import { truckIcon, fleetIcon, vesselIcon, bearing } from './vehicleIcons.js';
 
 // Stamp the build into the header before anything else can fail, so a stale
 // cached page is always distinguishable from a fresh deploy.
@@ -39,6 +40,7 @@ try {
     const jobManager = new JobManager(fleetManager, yard, geoManager);
     const truckManager = new TruckManager(geoManager, jobManager, yard);
     const transtainerManager = new TranstainerManager(geoManager, fleetManager, yard);
+    const vesselOpsManager = new VesselOpsManager(geoManager, vesselManager, transtainerManager);
     const storage = new StorageManager();
 
     // Place the fleet on the map (parked in the depot). Without this every
@@ -53,6 +55,7 @@ try {
     window.jobManager = jobManager;
     window.truckManager = truckManager;
     window.transtainer = transtainerManager;
+    window.vesselOps = vesselOpsManager;
     window.geo = geoManager;
 
     // ...
@@ -131,6 +134,10 @@ try {
     const containerLayer = L.layerGroup().addTo(map);
     // Vehicle Overlay Group
     const vehicleLayer = L.layerGroup().addTo(map);
+    // Vessel Overlay Group
+    const vesselLayer = L.layerGroup().addTo(map);
+    // Transtainer (RTG) Overlay Group — stationary, drawn once
+    const transtainerLayer = L.layerGroup().addTo(map);
 
     // --- 3. Interaction & Rendering Logic ---
 
@@ -1052,6 +1059,85 @@ try {
         });
     };
 
+    // Vessel Markers Cache: { vesselId: Marker }
+    const vesselMarkers = {};
+
+    const getVesselIcon = (heading, phase) => L.divIcon({
+        className: 'vessel-marker',
+        html: vesselIcon({ heading, phase }),
+        iconSize: [40, 100],
+        iconAnchor: [20, 50]
+    });
+
+    /**
+     * Ships move over open water, not the road network, so unlike
+     * renderVehicles() this has no pathfinding to do: VesselOpsManager
+     * already advances vessel.position every tick (straight-line
+     * interpolation), this just mirrors that position onto a marker.
+     */
+    const renderVessels = () => {
+        vesselManager.vessels.forEach(v => {
+            const gone = !v.position || v.status === 'DEPARTED';
+            let marker = vesselMarkers[v.id];
+
+            if (gone) {
+                if (marker) { marker.remove(); delete vesselMarkers[v.id]; }
+                return;
+            }
+
+            const heading = Math.round(v.position.rotation || 0);
+
+            if (!marker) {
+                marker = L.marker([v.position.lat, v.position.lng], {
+                    icon: getVesselIcon(heading, v.status)
+                }).addTo(vesselLayer).bindPopup('');
+                marker._phase = v.status;
+                marker._heading = heading;
+                vesselMarkers[v.id] = marker;
+            } else {
+                marker.setLatLng([v.position.lat, v.position.lng]);
+                if (marker._phase !== v.status || marker._heading !== heading) {
+                    marker.setIcon(getVesselIcon(heading, v.status));
+                    marker._phase = v.status;
+                    marker._heading = heading;
+                }
+            }
+
+            marker.setPopupContent(
+                `<b>🚢 ${v.name}</b><br>${v.status}<br>` +
+                `Scarico: ${v.manifest.discharge.length} residui<br>` +
+                `Carico: ${v.manifest.load.length} residui`
+            );
+        });
+    };
+
+    /**
+     * The four RTG crane units are fixed equipment — drawn once, not every
+     * frame. A lightweight interval refreshes their tooltip counts, decoupled
+     * from the render loop since they never move.
+     */
+    const renderTranstainerUnits = () => {
+        const markers = transtainerManager.units.map(unit => {
+            const marker = L.marker([unit.position.lat, unit.position.lng], {
+                icon: L.divIcon({
+                    className: 'transtainer-marker',
+                    html: `<div style="font-size:22px; line-height:1; filter:drop-shadow(0 0 2px #000);">🏗️</div>`,
+                    iconSize: [26, 26],
+                    iconAnchor: [13, 13]
+                })
+            }).addTo(transtainerLayer).bindTooltip('', { permanent: false, direction: 'top' });
+            return { unit, marker };
+        });
+
+        const refresh = () => markers.forEach(({ unit, marker }) => {
+            marker.setTooltipContent(
+                `<b>${unit.id}</b><br>Export: ${unit.exportedCount} | Import: ${unit.importedCount}`
+            );
+        });
+        refresh();
+        setInterval(refresh, 2000);
+    };
+
     // --- Animation Helpers ---
 
     /**
@@ -1397,6 +1483,7 @@ try {
     initMockData();
     renderApp();
     renderTruckRoutes();
+    renderTranstainerUnits();
     console.log("UI Ready - Leaflet Map Active.");
 
     // --- 6. Global Simulation Loop ---
@@ -1409,10 +1496,12 @@ try {
         if (truckManager) truckManager.update(dt);
         if (jobManager) jobManager.update(dt);
         if (transtainerManager) transtainerManager.update(dt);
+        if (vesselOpsManager) vesselOpsManager.update(dt);
 
         // Renders
         renderTrucks();
         renderVehicles(); // Ensure internal fleet moves automatically
+        renderVessels();
 
         requestAnimationFrame(gameLoop);
     };
