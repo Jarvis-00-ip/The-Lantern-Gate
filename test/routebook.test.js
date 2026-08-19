@@ -1,7 +1,8 @@
 import { describe, it, assert, equal } from './harness.js';
 import { RouteBook } from '../src/core/RouteBook.js';
 import { GeoManager } from '../src/core/GeoManager.js';
-import { TruckRoute, TRUCK_LEGS } from '../src/core/TruckManager.js';
+import { TruckRoute, TRUCK_LEGS, GATE_OUT_OF_GAUGE } from '../src/core/TruckManager.js';
+import { DEFAULT_TRUCK_ROUTES } from '../src/core/DefaultTruckRoutes.js';
 
 const geo = new GeoManager();
 
@@ -18,8 +19,9 @@ function fakeStorage() {
 const nuovo = () => new RouteBook(fakeStorage(), geo);
 
 describe('RouteBook — memorizzazione per tratta', () => {
-    it('senza disegno restituisce null (si usa l\'automatico)', () => {
-        equal(nuovo().get(TruckRoute.OCR, TruckRoute.LANES_IN), null);
+    it('una tratta senza default e senza disegno resta automatica', () => {
+        // OCR → varco fuori sagoma è l'unica tratta non ancora tracciata
+        equal(nuovo().get(TruckRoute.OCR, GATE_OUT_OF_GAUGE), null);
     });
 
     it('restituisce il percorso disegnato', () => {
@@ -30,11 +32,11 @@ describe('RouteBook — memorizzazione per tratta', () => {
         assert(rb.has(TruckRoute.OCR, TruckRoute.LANES_IN));
     });
 
-    it('tiene le tratte separate', () => {
+    it('disegnare una tratta non tocca le altre', () => {
         const rb = nuovo();
         rb.set(TruckRoute.OCR, TruckRoute.LANES_IN, [{ lat: 44.4066, lng: 8.9079 }, { lat: 44.4060, lng: 8.9108 }]);
-        equal(rb.get(TruckRoute.YARD, TruckRoute.LANES_OUT), null, 'una tratta ha invaso l\'altra');
-        equal(rb.count(), 1);
+        equal(rb.overrideCount(), 1, 'ha sovrascritto più di una tratta');
+        equal(rb.sourceOf(TruckRoute.YARD, TruckRoute.LANES_OUT), 'default', 'una tratta ha invaso l\'altra');
     });
 
     it('rifiuta un percorso con meno di due punti', () => {
@@ -44,11 +46,21 @@ describe('RouteBook — memorizzazione per tratta', () => {
         assert(alzata, 'un singolo punto non è un percorso');
     });
 
-    it('cancella una tratta riportandola all\'automatico', () => {
+    it('cancellare un disegno riporta al default di serie', () => {
         const rb = nuovo();
         rb.set(TruckRoute.OCR, TruckRoute.LANES_IN, [{ lat: 44.4066, lng: 8.9079 }, { lat: 44.4060, lng: 8.9108 }]);
+        equal(rb.sourceOf(TruckRoute.OCR, TruckRoute.LANES_IN), 'locale');
+
         rb.remove(TruckRoute.OCR, TruckRoute.LANES_IN);
-        equal(rb.get(TruckRoute.OCR, TruckRoute.LANES_IN), null);
+        equal(rb.sourceOf(TruckRoute.OCR, TruckRoute.LANES_IN), 'default', 'non è tornato al percorso di serie');
+        assert(rb.get(TruckRoute.OCR, TruckRoute.LANES_IN), 'la tratta è rimasta scoperta');
+    });
+
+    it('cancellare una tratta senza default la riporta all\'automatico', () => {
+        const rb = nuovo();
+        rb.set(TruckRoute.OCR, GATE_OUT_OF_GAUGE, [{ lat: 44.4066, lng: 8.9079 }, { lat: 44.4062, lng: 8.9075 }]);
+        rb.remove(TruckRoute.OCR, GATE_OUT_OF_GAUGE);
+        equal(rb.get(TruckRoute.OCR, GATE_OUT_OF_GAUGE), null);
     });
 });
 
@@ -82,14 +94,28 @@ describe('RouteBook — persistenza', () => {
 
         const rb2 = new RouteBook(storage, geo);
         await rb2.load();
-        equal(rb2.count(), 1, 'i percorsi non sono sopravvissuti al ricaricamento');
-        assert(rb2.has(TruckRoute.OCR, TruckRoute.LANES_IN));
+        equal(rb2.overrideCount(), 1, 'il disegno non è sopravvissuto al ricaricamento');
+        equal(rb2.sourceOf(TruckRoute.OCR, TruckRoute.LANES_IN), 'locale');
     });
 
-    it('parte a vuoto se non c\'è nulla di salvato', async () => {
+    it('senza nulla di salvato restano i default di serie', async () => {
         const rb = new RouteBook(fakeStorage(), geo);
         await rb.load();
-        equal(rb.count(), 0);
+        equal(rb.overrideCount(), 0, 'non dovrebbero esserci disegni locali');
+        equal(rb.count(), Object.keys(DEFAULT_TRUCK_ROUTES).length, 'i default non sono attivi');
+    });
+
+    it('i default coprono le tratte principali dell\'itinerario', () => {
+        const rb = nuovo();
+        [
+            [TruckRoute.SPAWN, TruckRoute.CUSTOMS_IN],
+            [TruckRoute.CUSTOMS_IN, TruckRoute.OCR],
+            [TruckRoute.OCR, TruckRoute.LANES_IN],
+            [TruckRoute.LANES_IN, TruckRoute.YARD],
+            [TruckRoute.YARD, TruckRoute.LANES_OUT],
+            [TruckRoute.LANES_OUT, TruckRoute.CUSTOMS_OUT],
+            [TruckRoute.CUSTOMS_OUT, TruckRoute.DESPAWN]
+        ].forEach(([a, b]) => assert(rb.has(a, b), `tratta scoperta nei default: ${a}→${b}`));
     });
 });
 

@@ -13,6 +13,7 @@ await import('./fleet.test.js');
 await import('./routing.test.js');
 await import('./oversize.test.js');
 await import('./routebook.test.js');
+await import('./defaultroutes.test.js');
 
 const failed = await run();
 process.exit(failed > 0 ? 1 : 0);

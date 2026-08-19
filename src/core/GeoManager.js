@@ -421,6 +421,20 @@ export class GeoManager {
         return inside;
     }
 
+    /**
+     * Whether a point falls inside a zone's polygon.
+     *
+     * Distance-to-centre is a poor test for arrival: WAITING_CAMION is ~127m
+     * long, so a truck can be properly parked in it and still sit 48m from the
+     * centroid. Zones are areas, not points.
+     * @returns {boolean}
+     */
+    isInsideZone(point, zoneId) {
+        const zone = this.zones.find(z => z.id === zoneId);
+        if (!zone || !zone.vertices || zone.vertices.length < 3 || !point) return false;
+        return this._isPointInPolygon(point, zone.vertices);
+    }
+
     getZoneCenter(zoneId) {
         const zone = this.zones.find(z => z.id === zoneId);
         if (!zone || !zone.vertices) return null;

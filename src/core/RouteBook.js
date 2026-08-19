@@ -1,4 +1,5 @@
 import { StorageKeys } from './StorageManager.js';
+import { DEFAULT_TRUCK_ROUTES } from './DefaultTruckRoutes.js';
 
 /**
  * The Lantern Gate - Route Book
@@ -20,7 +21,24 @@ export class RouteBook {
     constructor(storage, geoManager) {
         this.storage = storage;
         this.geoManager = geoManager;
-        this.routes = {}; // "FROM>TO" -> [{lat,lng}, ...]
+        this.overrides = {}; // locally drawn, "FROM>TO" -> [{lat,lng}, ...]
+    }
+
+    /**
+     * Effective routes: committed defaults with any local drawing layered on
+     * top. Reading goes through here so callers never have to know which is
+     * which.
+     */
+    get routes() {
+        return { ...DEFAULT_TRUCK_ROUTES, ...this.overrides };
+    }
+
+    /** Where a leg's route comes from: 'locale', 'default', or null. */
+    sourceOf(from, to) {
+        const key = RouteBook.key(from, to);
+        if (this.overrides[key]) return 'locale';
+        if (DEFAULT_TRUCK_ROUTES[key]) return 'default';
+        return null;
     }
 
     static key(from, to) {
@@ -31,15 +49,17 @@ export class RouteBook {
     async load() {
         const saved = await this.storage.load(StorageKeys.TRUCK_ROUTES, null);
         if (saved && typeof saved === 'object') {
-            this.routes = saved;
-            const n = Object.keys(this.routes).length;
-            if (n > 0) console.log(`[RouteBook] Restored ${n} hand-drawn leg(s).`);
+            this.overrides = saved;
+            const n = Object.keys(this.overrides).length;
+            if (n > 0) console.log(`[RouteBook] Restored ${n} locally drawn leg(s).`);
         }
+        console.log(`[RouteBook] ${Object.keys(this.routes).length} leg(s) hand-routed (${Object.keys(DEFAULT_TRUCK_ROUTES).length} built in).`);
         return this.routes;
     }
 
+    /** Only local drawings are persisted; defaults live in source. */
     async persist() {
-        return this.storage.save(StorageKeys.TRUCK_ROUTES, this.routes);
+        return this.storage.save(StorageKeys.TRUCK_ROUTES, this.overrides);
     }
 
     /**
@@ -82,20 +102,28 @@ export class RouteBook {
             }
         }
 
-        this.routes[RouteBook.key(from, to)] = clean;
+        this.overrides[RouteBook.key(from, to)] = clean;
         return clean;
     }
 
+    /** Drops a local drawing, falling back to the built-in default if there is one. */
     remove(from, to) {
-        delete this.routes[RouteBook.key(from, to)];
+        delete this.overrides[RouteBook.key(from, to)];
     }
 
+    /** Drops every local drawing. Built-in defaults remain in force. */
     clear() {
-        this.routes = {};
+        this.overrides = {};
     }
 
+    /** Legs with a route at all (defaults plus local drawings). */
     count() {
         return Object.keys(this.routes).length;
+    }
+
+    /** Legs the operator has drawn locally, overriding whatever shipped. */
+    overrideCount() {
+        return Object.keys(this.overrides).length;
     }
 
     /** Length of a stored drawing in metres, for the editor's readout. */

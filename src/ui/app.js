@@ -1270,7 +1270,15 @@ try {
                         if (drawn) marker.usingDrawnRoute = true;
 
                         if (path && path.length > 0) {
-                            const fullPath = [start, ...path, { lat: targetCenter.lat, lng: targetCenter.lng }];
+                            // A drawn route ends where trucks actually stop. Only
+                            // append the zone centre when the path does not already
+                            // reach inside the zone, otherwise we would drag the
+                            // truck off the drawn line towards the centroid.
+                            const last = path[path.length - 1];
+                            const reachesZone = drawn && geoManager.isInsideZone(last, t.targetZone);
+                            const fullPath = reachesZone
+                                ? [start, ...path]
+                                : [start, ...path, { lat: targetCenter.lat, lng: targetCenter.lng }];
                             marker.isFollowingPath = true;
                             // Use generic animatePath helper
                             // SPEED UPDATE: 70 km/h ~= 19.44 m/s
